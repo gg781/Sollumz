@@ -1,58 +1,128 @@
-from ..ybn.operators import apply_default_flag_preset
-from ..sollumz_helper import SOLLUMZ_OT_base
-from ..sollumz_properties import SOLLUMZ_UI_NAMES, LightType, SollumType, MaterialType
-from ..sollumz_operators import SelectTimeFlagsRange, ClearTimeFlags
-from ..ydr.shader_materials import create_shader, create_tinted_shader_graph, shadermats
-from ..tools.drawablehelper import (
-    MaterialConverter,
-    convert_selected_to_drawable,
-    create_drawable,
-    set_recommended_bone_properties
-)
-from ..tools.blenderhelper import get_children_recursive
-from ..tools.boundhelper import convert_selected_to_bound
-from ..cwxml.shader import ShaderManager
 import traceback
 import bpy
+from bpy.types import Context
+
+from ..lods import LODLevels
+from ..sollumz_helper import SOLLUMZ_OT_base, find_sollumz_parent
+from ..sollumz_properties import SOLLUMZ_UI_NAMES, LODLevel, LightType, SollumType, MaterialType
+from ..sollumz_operators import SelectTimeFlagsRange, ClearTimeFlags
+from ..ydr.shader_materials import create_shader, create_tinted_shader_graph, is_tint_material, shadermats
+from ..tools.drawablehelper import MaterialConverter, set_recommended_bone_properties, convert_obj_to_drawable, convert_obj_to_model, convert_objs_to_single_drawable, center_drawable_to_models
+from ..tools.boundhelper import convert_obj_to_composite, convert_objs_to_single_composite
+from ..tools.blenderhelper import add_armature_modifier, add_child_of_bone_constraint, create_blender_object, create_empty_object, duplicate_object, get_child_of_constraint, set_child_of_constraint_space, tag_redraw
+from ..sollumz_helper import get_sollumz_materials
+from .properties import DrawableShaderOrder
 
 
-class SOLLUMZ_OT_create_drawable(SOLLUMZ_OT_base, bpy.types.Operator):
-    """Create a sollumz drawable of the selected type."""
+class SOLLUMZ_OT_create_drawable(bpy.types.Operator):
+    """Create a Drawable empty"""
     bl_idname = "sollumz.createdrawable"
-    bl_label = f"Create Drawable"
-    bl_action = "Create a Drawable"
-    bl_update_view = False
+    bl_label = "Create Drawable"
 
-    def run(self, context):
-        aobj = context.active_object
+    def execute(self, context):
         selected = context.selected_objects
-        drawable_type = context.scene.create_drawable_type
-        if drawable_type == SollumType.DRAWABLE and len(selected) > 0:
-            dobjs = convert_selected_to_drawable(
-                selected, context.scene.use_mesh_name, context.scene.create_seperate_objects, context.scene.create_center_to_selection)
-            if context.scene.auto_create_embedded_col:
-                cobjs = convert_selected_to_bound(
-                    context.selected_objects, use_name=False, multiple=context.scene.create_seperate_objects, bvhs=True, replace_original=False, do_center=False)
-                if context.scene.composite_apply_default_flag_preset:
-                    for obj in cobjs:
-                        for cobj_child in obj.children:
-                            if cobj_child.sollum_type == SollumType.BOUND_GEOMETRYBVH:
-                                apply_default_flag_preset(cobj_child, self)
-                for index, composite in enumerate(cobjs):
-                    composite.parent = dobjs[index]
-                    if context.scene.create_center_to_selection:
-                        for child in get_children_recursive(composite):
-                            if child.type == "MESH":
-                                child.location -= dobjs[index].location
 
-            self.message(
-                f"Succesfully converted {', '.join([obj.name for obj in context.selected_objects])} to a {SOLLUMZ_UI_NAMES[SollumType.DRAWABLE]}.")
-            return True
+        if selected:
+            parent = selected[0]
         else:
-            obj = create_drawable(drawable_type)
-            if aobj:
-                obj.parent = aobj
-            return True
+            parent = None
+
+        drawable_obj = create_empty_object(SollumType.DRAWABLE)
+        drawable_obj.parent = parent
+
+        return {"FINISHED"}
+
+
+class SOLLUMZ_OT_create_drawable_dict(bpy.types.Operator):
+    """Create a Drawable Dictionary empty"""
+    bl_idname = "sollumz.createdrawabledict"
+    bl_label = "Create Drawable Dictionary"
+
+    def execute(self, context):
+        selected = context.selected_objects
+
+        if selected:
+            parent = selected[0]
+        else:
+            parent = None
+
+        ydd_obj = create_empty_object(SollumType.DRAWABLE_DICTIONARY)
+        ydd_obj.parent = parent
+
+        return {"FINISHED"}
+
+
+class SOLLUMZ_OT_convert_to_drawable(bpy.types.Operator):
+    """Convert the selected object to a Drawable"""
+    bl_idname = "sollumz.converttodrawable"
+    bl_label = "Convert to Drawable"
+    bl_options = {"UNDO"}
+
+    def execute(self, context):
+        selected_meshes = [
+            obj for obj in context.selected_objects if obj.type == "MESH"]
+
+        if not selected_meshes:
+            self.report({"INFO"}, f"No mesh objects selected!")
+            return {"CANCELLED"}
+
+        auto_embed_col = context.scene.auto_create_embedded_col
+        do_center = context.scene.center_drawable_to_selection
+
+        if context.scene.create_seperate_drawables or len(selected_meshes) == 1:
+            self.convert_separate_drawables(selected_meshes, auto_embed_col)
+        else:
+            self.convert_to_single_drawable(
+                selected_meshes, auto_embed_col, do_center)
+
+        self.report(
+            {"INFO"}, f"Succesfully converted all selected objects to a Drawable.")
+
+        return {"FINISHED"}
+
+    def convert_separate_drawables(self, selected_meshes: list[bpy.types.Object], auto_embed_col: bool = False):
+        for obj in selected_meshes:
+            drawable_obj = convert_obj_to_drawable(obj)
+
+            if auto_embed_col:
+                composite_obj = convert_obj_to_composite(
+                    duplicate_object(obj), SollumType.BOUND_GEOMETRYBVH, True)
+                composite_obj.parent = drawable_obj
+                composite_obj.name = f"{drawable_obj.name}.col"
+
+    def convert_to_single_drawable(self, selected_meshes: list[bpy.types.Object], auto_embed_col: bool = False, do_center: bool = False):
+        drawable_obj = convert_objs_to_single_drawable(selected_meshes)
+
+        if do_center:
+            center_drawable_to_models(drawable_obj)
+
+        if auto_embed_col:
+            col_objs = [duplicate_object(o) for o in selected_meshes]
+            composite_obj = convert_objs_to_single_composite(
+                col_objs, SollumType.BOUND_GEOMETRYBVH, True)
+            composite_obj.parent = drawable_obj
+
+
+class SOLLUMZ_OT_convert_to_drawable_model(bpy.types.Operator):
+    """Convert the selected object to a Drawable Model"""
+    bl_idname = "sollumz.converttodrawablemodel"
+    bl_label = "Convert to Drawable Model"
+    bl_options = {"UNDO"}
+
+    def execute(self, context):
+        selected_meshes = [
+            obj for obj in context.selected_objects if obj.type == "MESH"]
+
+        if not selected_meshes:
+            self.report({"INFO"}, f"No mesh objects selected!")
+            return {"CANCELLED"}
+
+        for obj in selected_meshes:
+            convert_obj_to_model(obj)
+            self.report(
+                {"INFO"}, f"Converted {obj.name} to a {SOLLUMZ_UI_NAMES[SollumType.DRAWABLE_MODEL]}.")
+
+        return {"FINISHED"}
 
 
 class SOLLUMZ_OT_create_light(SOLLUMZ_OT_base, bpy.types.Operator):
@@ -148,14 +218,15 @@ class SOLLUMZ_OT_create_shader_material(SOLLUMZ_OT_base, bpy.types.Operator):
     def create_material(self, context, obj, shader):
         mat = create_shader(shader)
         obj.data.materials.append(mat)
-        if mat.shader_properties.filename in ShaderManager.tinted_shaders():
-            create_tinted_shader_graph(obj)
 
         for n in mat.node_tree.nodes:
             if isinstance(n, bpy.types.ShaderNodeTexImage):
                 texture = bpy.data.images.new(
                     name="Texture", width=512, height=512)
                 n.image = texture
+
+        if is_tint_material(mat):
+            create_tinted_shader_graph(obj)
 
     def run(self, context):
 
@@ -200,10 +271,10 @@ class SOLLUMZ_OT_set_all_textures_embedded(SOLLUMZ_OT_base, bpy.types.Operator):
                 f"Skipping object {obj.name} because it does not have a sollumz shader active.")
 
     def run(self, context):
-        objs = bpy.context.selected_objects
+        objs = [obj for obj in context.selected_objects if obj.type == "MESH"]
         if len(objs) == 0:
-            self.warning(
-                f"Please select a object to set all textures embedded.")
+            self.message(
+                f"No mesh objects selected!")
             return False
 
         for obj in objs:
@@ -231,10 +302,10 @@ class SOLLUMZ_OT_set_all_materials_embedded(SOLLUMZ_OT_base, bpy.types.Operator)
                     f"Skipping object {obj.name} because it does not have a sollumz shader active.")
 
     def run(self, context):
-        objs = bpy.context.selected_objects
+        objs = [obj for obj in context.selected_objects if obj.type == "MESH"]
         if len(objs) == 0:
-            self.warning(
-                f"Please select a object to set all textures embedded.")
+            self.message(
+                f"No mesh objects selected!")
             return False
 
         for obj in objs:
@@ -266,10 +337,10 @@ class SOLLUMZ_OT_remove_all_textures_embedded(SOLLUMZ_OT_base, bpy.types.Operato
                 f"Skipping object {obj.name} because it does not have a sollumz shader active.")
 
     def run(self, context):
-        objs = bpy.context.selected_objects
-        if (len(objs) == 0):
-            self.warning(
-                f"Please select a object to remove all embeded textures.")
+        objs = [obj for obj in context.selected_objects if obj.type == "MESH"]
+        if len(objs) == 0:
+            self.message(
+                f"No mesh objects selected!")
             return False
 
         for obj in objs:
@@ -297,10 +368,10 @@ class SOLLUMZ_OT_unset_all_materials_embedded(SOLLUMZ_OT_base, bpy.types.Operato
                     f"Skipping object {obj.name} because it does not have a sollumz shader active.")
 
     def run(self, context):
-        objs = bpy.context.selected_objects
-        if (len(objs) == 0):
-            self.warning(
-                f"Please select a object to remove all embedded materials.")
+        objs = [obj for obj in context.selected_objects if obj.type == "MESH"]
+        if len(objs) == 0:
+            self.message(
+                f"No mesh objects selected!")
             return False
 
         for obj in objs:
@@ -315,7 +386,7 @@ class SOLLUMZ_OT_BONE_FLAGS_NewItem(SOLLUMZ_OT_base, bpy.types.Operator):
     bl_action = "Add a Bone Flag"
 
     def run(self, context):
-        bone = context.active_pose_bone.bone
+        bone = context.active_bone
         bone.bone_properties.flags.add()
         self.message(f"Added bone flag to bone: {bone.name}")
         return True
@@ -328,11 +399,10 @@ class SOLLUMZ_OT_BONE_FLAGS_DeleteItem(SOLLUMZ_OT_base, bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-        if context.active_pose_bone:
-            return context.active_pose_bone.bone.bone_properties.flags
+        return context.active_bone is not None and context.active_bone.bone_properties.flags
 
     def run(self, context):
-        bone = context.active_pose_bone.bone
+        bone = context.active_bone
         list = bone.bone_properties.flags
         index = bone.bone_properties.ul_index
         list.remove(index)
@@ -406,79 +476,414 @@ class SOLLUMZ_OT_apply_bone_properties_to_selected_bones(SOLLUMZ_OT_base, bpy.ty
         self.message(f"Apply bone properties to {count} bone(s)")
         return True
 
-class SOLLUMZ_OT_clear_bone_flags(bpy.types.Operator):
+
+class ObjectPoseModeRestrictedHelper:
+    @classmethod
+    def poll(cls, context: Context):
+        cls.poll_message_set("Must be in object mode or pose mode.")
+        return context.mode == "OBJECT" or context.mode == "POSE"
+
+
+class SOLLUMZ_OT_clear_bone_flags(bpy.types.Operator, ObjectPoseModeRestrictedHelper):
     bl_idname = "sollumz.removeboneflags"
     bl_label = "Remove Bone Flags"
     bl_description = "Remove all bone flags for selected bones"
+    bl_options = {"REGISTER", "UNDO"}
 
     def execute(self, context):
-        bone = context.active_pose_bone.bone
-        bone.bone_properties.flags.clear()  # Remove all the flags
+        bone = context.active_bone
+        bone.bone_properties.flags.clear()
+        tag_redraw(context)
         self.report({'INFO'}, "Flags Removed")
         return {'FINISHED'}
 
 
-class SOLLUMZ_OT_rotation_bone_flags(bpy.types.Operator):
+class SOLLUMZ_OT_rotation_bone_flags(bpy.types.Operator, ObjectPoseModeRestrictedHelper):
     bl_idname = "sollumz.rotationboneflags"
     bl_label = "Add Rotation Flags"
     bl_description = "Add rotation flags for selected bones"
 
     def execute(self, context):
-        bone = context.active_pose_bone.bone
+        bone = context.active_bone
         new_flag = bone.bone_properties.flags.add()
         new_flag.name = "RotX"
         new_flag = bone.bone_properties.flags.add()
         new_flag.name = "RotY"
         new_flag = bone.bone_properties.flags.add()
         new_flag.name = "RotZ"
+        tag_redraw(context)
         self.report({'INFO'}, "Rotation Flags Added")
         return {'FINISHED'}
 
 
-class SOLLUMZ_OT_transform_bone_flags(bpy.types.Operator):
+class SOLLUMZ_OT_transform_bone_flags(bpy.types.Operator, ObjectPoseModeRestrictedHelper):
     bl_idname = "sollumz.transformboneflags"
     bl_label = "Add Transform Flags"
     bl_description = "Add transform flags for selected bones"
 
     def execute(self, context):
-        bone = context.active_pose_bone.bone
+        bone = context.active_bone
         new_flag = bone.bone_properties.flags.add()
         new_flag.name = "TransX"
         new_flag = bone.bone_properties.flags.add()
         new_flag.name = "TransY"
         new_flag = bone.bone_properties.flags.add()
         new_flag.name = "TransZ"
+        tag_redraw(context)
         self.report({'INFO'}, "Transform Flags Added")
         return {'FINISHED'}
 
 
-class SOLLUMZ_OT_scale_bone_flags(bpy.types.Operator):
+class SOLLUMZ_OT_scale_bone_flags(bpy.types.Operator, ObjectPoseModeRestrictedHelper):
     bl_idname = "sollumz.scaleboneflags"
     bl_label = "Add Scale Flags"
     bl_description = "Add scale flags for selected bones"
 
     def execute(self, context):
-        bone = context.active_pose_bone.bone
+        bone = context.active_bone
         new_flag = bone.bone_properties.flags.add()
         new_flag.name = "ScaleX"
         new_flag = bone.bone_properties.flags.add()
         new_flag.name = "ScaleY"
         new_flag = bone.bone_properties.flags.add()
         new_flag.name = "ScaleZ"
+        tag_redraw(context)
         self.report({'INFO'}, "Scale Flags Added")
         return {'FINISHED'}
 
 
-class SOLLUMZ_OT_limit_bone_flags(bpy.types.Operator):
+class SOLLUMZ_OT_limit_bone_flags(bpy.types.Operator, ObjectPoseModeRestrictedHelper):
     bl_idname = "sollumz.limitboneflags"
     bl_label = "Add Limit Flags"
     bl_description = "Removes selected bone flags and adds the proper limit flags for custom bone locations"
 
     def execute(self, context):
-        bone = context.active_pose_bone.bone
+        bone = context.active_bone
         new_flag = bone.bone_properties.flags.add()
         new_flag.name = "LimitRotation"
         new_flag = bone.bone_properties.flags.add()
         new_flag.name = "LimitTranslation"
+        tag_redraw(context)
         self.report({'INFO'}, "Limit Flags Added")
         return {'FINISHED'}
+
+
+class SOLLUMZ_OT_move_shader_up(bpy.types.Operator):
+    bl_idname = "sollumz.move_shader_up"
+    bl_label = "Up"
+    bl_description = "Move shader up in the rendering order"
+
+    @classmethod
+    def poll(self, context):
+        aobj = context.active_object
+
+        if aobj is None or aobj.sollum_type != SollumType.DRAWABLE:
+            return False
+
+        drawable_props = aobj.drawable_properties
+        num_shaders = len(drawable_props.shader_order.items)
+        shader_ind = drawable_props.shader_order.get_active_shader_item_index()
+
+        return shader_ind < num_shaders and shader_ind != 0
+
+    def execute(self, context):
+        aobj = context.active_object
+        drawable_props = aobj.drawable_properties
+        shader_ind = drawable_props.shader_order.get_active_shader_item_index()
+
+        drawable_props.shader_order.change_shader_index(
+            shader_ind, shader_ind - 1)
+
+        return {"FINISHED"}
+
+
+class SOLLUMZ_OT_move_shader_down(bpy.types.Operator):
+    bl_idname = "sollumz.move_shader_down"
+    bl_label = "Down"
+    bl_description = "Move shader down in the rendering order"
+
+    @classmethod
+    def poll(self, context):
+        aobj = context.active_object
+
+        if aobj is None or aobj.sollum_type != SollumType.DRAWABLE:
+            return False
+
+        drawable_props = aobj.drawable_properties
+        num_shaders = len(drawable_props.shader_order.items)
+        shader_ind = drawable_props.shader_order.get_active_shader_item_index()
+
+        return shader_ind < num_shaders - 1 and num_shaders > 1
+
+    def execute(self, context):
+        aobj = context.active_object
+        drawable_props = aobj.drawable_properties
+        shader_ind = drawable_props.shader_order.get_active_shader_item_index()
+
+        drawable_props.shader_order.change_shader_index(
+            shader_ind, shader_ind + 1)
+
+        return {"FINISHED"}
+
+
+class SOLLUMZ_OT_order_shaders(bpy.types.Operator):
+    bl_idname = "sollumz.order_shaders"
+    bl_label = "Order Shaders"
+    bl_options = {"REGISTER", "UNDO"}
+    bl_description = "Determine shader rendering order"
+
+    def draw(self, context):
+        layout = self.layout
+        shader_order = context.active_object.drawable_properties.shader_order
+
+        row = layout.row()
+        col = row.column()
+
+        col.template_list("SOLLUMZ_UL_SHADER_ORDER_LIST", "", shader_order, "items",
+                          shader_order, "active_index", maxrows=40)
+
+        col = row.column(align=True)
+        col.operator("sollumz.move_shader_up", text="", icon="TRIA_UP")
+        col.operator("sollumz.move_shader_down", text="", icon="TRIA_DOWN")
+
+    def execute(self, context):
+        aobj = context.active_object
+        self.apply_order(aobj)
+
+        return {"FINISHED"}
+
+    def invoke(self, context, event):
+        wm = context.window_manager
+
+        aobj = context.active_object
+        self.add_initial_items(aobj)
+
+        return wm.invoke_props_dialog(self, width=800)
+
+    def add_initial_items(self, drawable_obj: bpy.types.Object):
+        """Add initial shader sort items based on materials from drawable_obj"""
+        shader_order: DrawableShaderOrder = drawable_obj.drawable_properties.shader_order
+        mats = get_sollumz_materials(drawable_obj)
+        self.validate_indices(mats)
+
+        shader_order.items.clear()
+
+        for mat in mats:
+            item = shader_order.items.add()
+            item.index = mat.shader_properties.index
+            item.name = mat.name
+            item.filename = mat.shader_properties.filename
+
+    def validate_indices(self, mats: list[bpy.types.Material]):
+        """Ensure valid and unique shader indices (in-case user changed them or blend file is from previous version)"""
+        shader_inds = [mat.shader_properties.index for mat in mats]
+        has_repeating_indices = any(
+            shader_inds.count(i) > 1 for i in shader_inds)
+        inds_out_of_range = any(i >= len(mats) for i in shader_inds)
+
+        if not has_repeating_indices and not inds_out_of_range:
+            return
+
+        for i, mat in enumerate(mats):
+            mat.shader_properties.index = i
+
+    def apply_order(self, drawable_obj: bpy.types.Object):
+        """Set material shader indices based on shader order"""
+        shader_order: DrawableShaderOrder = drawable_obj.drawable_properties.shader_order
+        mats = get_sollumz_materials(drawable_obj)
+
+        if len(shader_order.items) != len(mats):
+            self.report(
+                {"ERROR"}, "Failed to apply order, shader collection size mismatch!")
+            return {"CANCELLED"}
+
+        for i, mat in enumerate(mats):
+            mat.shader_properties.index = shader_order.items[i].index
+
+        return {"FINISHED"}
+
+
+class SOLLUMZ_OT_add_child_of_constraint(bpy.types.Operator):
+    bl_idname = "sollumz.add_child_of_constraint"
+    bl_label = "Add Bone Constraint"
+    bl_options = {"REGISTER", "UNDO"}
+    bl_description = "Add Child Of constraint to the selected Drawable Model and set the proper constraint properties"
+
+    @classmethod
+    def poll(self, context):
+        return len(context.selected_objects) > 0
+
+    def execute(self, context):
+        for obj in context.selected_objects:
+            parent_obj = find_sollumz_parent(obj)
+
+            if parent_obj is None or parent_obj.type != "ARMATURE":
+                self.report(
+                    {"INFO"}, f"{obj.name} must be parented to a Drawable armature, or Drawable that is parented to a Fragment!")
+                return {"CANCELLED"}
+
+            add_child_of_bone_constraint(obj, armature_obj=parent_obj)
+
+        return {"FINISHED"}
+
+
+class SOLLUMZ_OT_add_armature_modifier_constraint(bpy.types.Operator):
+    bl_idname = "sollumz.add_armature_modifier"
+    bl_label = "Add Armature Modifier"
+    bl_options = {"REGISTER", "UNDO"}
+    bl_description = "Add armature modifier to object with first Sollumz parent as the modifier object"
+
+    @classmethod
+    def poll(self, context):
+        return len(context.selected_objects) > 0
+
+    def execute(self, context):
+        for obj in context.selected_objects:
+            parent_obj = find_sollumz_parent(obj)
+            is_drawable_model = obj.sollum_type == SollumType.DRAWABLE_MODEL
+
+            if parent_obj is None or not is_drawable_model:
+                self.report(
+                    {"INFO"}, f"{obj.name} must be a Drawable Model and parented to a Drawable!")
+                return {"CANCELLED"}
+
+            if parent_obj.type != "ARMATURE":
+                self.report(
+                    {"INFO"}, f"{obj.name} must be parented to a Drawable armature, or Drawable that is parented to a Fragment!")
+                return {"CANCELLED"}
+
+            add_armature_modifier(obj, parent_obj)
+
+        return {"FINISHED"}
+
+
+class SOLLUMZ_OT_set_correct_child_of_space(bpy.types.Operator):
+    bl_idname = "sollumz.set_correct_child_of_space"
+    bl_label = "Set correct space for bone parenting"
+    bl_options = {"REGISTER", "UNDO"}
+    bl_description = "Sets the owner space and target space such that it behaves the same way as bone parenting"
+
+    @classmethod
+    def poll(self, context):
+        return context.active_object is not None and get_child_of_constraint(context.active_object) is not None
+
+    def execute(self, context):
+        constraint = get_child_of_constraint(context.active_object)
+        set_child_of_constraint_space(constraint)
+
+        return {"FINISHED"}
+
+
+class SOLLUMZ_OT_auto_lod(bpy.types.Operator):
+    bl_idname = "sollumz.auto_lod"
+    bl_label = "Generate LODs"
+    bl_options = {"REGISTER", "UNDO"}
+    bl_description = "Generate Drawable Model LODs via decimate modifier. Uses object's current mesh as highest LOD level"
+
+    @classmethod
+    def poll(self, context):
+        return context.active_object is not None and context.active_object.sollum_type == SollumType.DRAWABLE_MODEL
+
+    def execute(self, context: Context):
+        aobj = context.active_object
+        ref_mesh = context.scene.sollumz_auto_lod_ref_mesh
+
+        if ref_mesh is None:
+            self.report(
+                {"INFO"}, "No reference mesh specified! You must specify a mesh to use as the highest LOD level!")
+            return {"CANCELLED"}
+
+        lods = self.get_selected_lods_sorted(context)
+
+        if not lods:
+            return {"CANCELLED"}
+
+        obj_lods: LODLevels = aobj.sollumz_lods
+
+        if not self.has_sollumz_lods(aobj):
+            obj_lods.add_empty_lods()
+
+        decimate_step = context.scene.sollumz_auto_lod_decimate_step
+        last_mesh = ref_mesh
+
+        previous_mode = aobj.mode
+        previous_lod_level = obj_lods.active_lod.level
+
+        for lod_level in lods:
+            mesh = last_mesh.copy()
+            mesh.name = self.get_lod_mesh_name(aobj.name, lod_level)
+
+            obj_lods.set_lod_mesh(lod_level, mesh)
+            obj_lods.set_active_lod(lod_level)
+
+            bpy.ops.object.mode_set(mode="EDIT")
+            bpy.ops.mesh.decimate(ratio=1.0 - decimate_step)
+            bpy.ops.object.mode_set(mode=previous_mode)
+
+            last_mesh = mesh
+
+        obj_lods.set_active_lod(previous_lod_level)
+
+        return {"FINISHED"}
+
+    def has_sollumz_lods(self, obj: bpy.types.Object):
+        """Ensure obj has sollumz_lods.lods populated"""
+        obj_lod_levels = [lod.level for lod in obj.sollumz_lods.lods]
+        return all(lod_level in obj_lod_levels for lod_level in LODLevel)
+
+    def get_lod_mesh_name(self, obj_name: str, lod_level: LODLevel):
+        return f"{obj_name}.{SOLLUMZ_UI_NAMES[lod_level].lower()}"
+
+    def get_selected_lods_sorted(self, context: Context) -> tuple[LODLevel]:
+        lod_levels = [LODLevel.VERYHIGH, LODLevel.HIGH,
+                      LODLevel.MEDIUM, LODLevel.LOW, LODLevel.VERYLOW]
+
+        return tuple(lod for lod in lod_levels if lod in context.scene.sollumz_auto_lod_levels)
+
+
+class SOLLUMZ_OT_extract_lods(bpy.types.Operator):
+    bl_idname = "sollumz.extract_lods"
+    bl_label = "Extract LODs"
+    bl_options = {"REGISTER", "UNDO"}
+    bl_description = "Extract all meshes of the selected Drawable Model into separate objects"
+
+    @classmethod
+    def poll(self, context):
+        return context.active_object is not None and context.active_object.sollum_type == SollumType.DRAWABLE_MODEL
+
+    def execute(self, context: Context):
+        aobj = context.active_object
+        parent = self.create_parent(context, f"{aobj.name}.LODs")
+        lod_levels = context.scene.sollumz_extract_lods_levels
+
+        for lod_level in lod_levels:
+            lod = aobj.sollumz_lods.get_lod(lod_level)
+
+            if lod is None or lod.mesh is None:
+                continue
+
+            mesh = lod.mesh
+            lod_obj = create_blender_object(SollumType.NONE, mesh.name, mesh)
+            self.parent_object(lod_obj, parent)
+
+        return {"FINISHED"}
+
+    def create_parent(self, context: Context, name: str) -> bpy.types.Object | bpy.types.Collection:
+        parent_type = context.scene.sollumz_extract_lods_parent_type
+
+        if parent_type == "sollumz_extract_lods_parent_type_collection":
+            parent = bpy.data.collections.new(name)
+            context.collection.children.link(parent)
+        else:
+            parent = create_empty_object(SollumType.NONE, name)
+
+        return parent
+
+    def parent_object(self, obj: bpy.types.Object, parent: bpy.types.Object | bpy.types.Collection):
+        if isinstance(parent, bpy.types.Object):
+            obj.parent = parent
+        elif isinstance(parent, bpy.types.Collection):
+            if obj.users_collection:
+                obj.users_collection[0].objects.unlink(obj)
+
+            parent.objects.link(obj)

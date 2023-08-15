@@ -1,80 +1,111 @@
 import bpy
 import os
-from ..cwxml.drawable import YDD
-from ..cwxml.fragment import YFT
-from ..ydr.ydrimport import drawable_to_obj
-from ..tools.drawablehelper import join_drawable_geometries
+from typing import Optional
+from ..cwxml.drawable import YDD, DrawableDictionary, Skeleton
+from ..cwxml.fragment import YFT, Fragment
+from ..ydr.ydrimport import create_drawable_obj, create_drawable_skel, apply_rotation_limits
 from ..sollumz_properties import SollumType
-from ..sollumz_helper import find_fragment_file
+from ..sollumz_preferences import get_import_settings
+from ..tools.blenderhelper import create_empty_object, create_blender_object
+from ..tools.utils import get_filename
+
+from .. import logger
 
 
-def drawable_dict_to_obj(drawable_dict, filepath, import_settings):
+def import_ydd(filepath: str):
+    import_settings = get_import_settings()
 
-    name = os.path.basename(filepath)[:-8]
-    vmodels = []
-    # bones are shared in single ydd however they still have to be placed under a paticular drawable
+    ydd_xml = YDD.from_xml_file(filepath)
 
-    armature_with_skel_obj = None
-    mod_objs = []
-    drawable_with_skel = None
-    for drawable in drawable_dict:
-        if len(drawable.skeleton.bones) > 0:
-            drawable_with_skel = drawable
-            break
+    if import_settings.import_ext_skeleton:
+        skel_yft = load_external_skeleton(filepath)
 
-    for drawable in drawable_dict:
-        # Pass is_ydd=True in drawable_to_obj function to opt out the drawable_model and bone parenting.
-        # If is_ydd is not passed or set to False in case of YDD,
-        # drawable_model and drawable_mesh are rotated by 180° on Z-axis
+        if skel_yft is not None and skel_yft.drawable.skeleton is not None:
+            return create_ydd_obj_ext_skel(ydd_xml, filepath, skel_yft)
 
-        drawable_obj = drawable_to_obj(
-            drawable, filepath, drawable.name, bones_override=drawable_with_skel.skeleton.bones if drawable_with_skel else None, import_settings=import_settings, is_ydd=True)
-        if (armature_with_skel_obj is None and drawable_with_skel is not None and len(drawable.skeleton.bones) > 0):
-            armature_with_skel_obj = drawable_obj
+    return create_ydd_obj(ydd_xml, filepath)
 
-        for model in drawable_obj.children:
-            if model.sollum_type != SollumType.DRAWABLE_MODEL:
-                continue
-            for geo in model.children:
-                if geo.sollum_type != SollumType.DRAWABLE_GEOMETRY:
-                    continue
-                mod_objs.append(geo)
 
-        vmodels.append(drawable_obj)
+def load_external_skeleton(ydd_filepath: str) -> Optional[Fragment]:
+    """Read first yft at ydd_filepath into a Fragment"""
+    directory = os.path.dirname(ydd_filepath)
 
-    dict_obj = bpy.data.objects.new(name, None)
-    dict_obj.sollum_type = SollumType.DRAWABLE_DICTIONARY
-    bpy.context.collection.objects.link(dict_obj)
+    yft_filepath = get_first_yft_path(directory)
 
-    for vmodel in vmodels:
-        vmodel.parent = dict_obj
+    if yft_filepath is None:
+        logger.warning(
+            f"Could not find external skeleton yft in directory '{directory}'.")
+        return
 
-    if armature_with_skel_obj is not None:
-        for obj in mod_objs:
-            mod = obj.modifiers.get("Armature")
-            if mod is None:
-                continue
-            mod.object = armature_with_skel_obj
+    logger.info(f"Using '{yft_filepath}' as external skeleton...")
+
+    return YFT.from_xml_file(yft_filepath)
+
+
+def get_first_yft_path(directory: str):
+    for filepath in os.listdir(directory):
+        if filepath.endswith(".yft.xml"):
+            return os.path.join(directory, filepath)
+
+
+def create_ydd_obj_ext_skel(ydd_xml: DrawableDictionary, filepath: str, external_skel: Fragment):
+    """Create ydd object with an external skeleton."""
+    name = get_filename(filepath)
+    dict_obj = create_armature_parent(name, external_skel)
+
+    for drawable_xml in ydd_xml:
+        external_bones = None
+        external_armature = None
+
+        if not drawable_xml.skeleton.bones:
+            external_bones = external_skel.drawable.skeleton.bones
+
+        if not drawable_xml.skeleton.bones:
+            external_armature = dict_obj
+
+        drawable_obj = create_drawable_obj(
+            drawable_xml, filepath, external_armature=external_armature, external_bones=external_bones)
+        drawable_obj.parent = dict_obj
 
     return dict_obj
 
 
-def import_ydd(export_op, filepath, import_settings):
-    ydd_xml = YDD.from_xml_file(filepath)
+def create_ydd_obj(ydd_xml: DrawableDictionary, filepath: str):
 
-    if import_settings.import_ext_skeleton:
-        skel_filepath = find_fragment_file(filepath)
-        if skel_filepath:
-            yft = YFT.from_xml_file(skel_filepath)
-            for drawable in ydd_xml:
-                drawable.skeleton = yft.drawable.skeleton
+    name = get_filename(filepath)
+    dict_obj = create_empty_object(SollumType.DRAWABLE_DICTIONARY, name)
+
+    ydd_skel = find_first_skel(ydd_xml)
+
+    for drawable_xml in ydd_xml:
+        if not drawable_xml.skeleton.bones and ydd_skel is not None:
+            external_bones = ydd_skel.bones
         else:
-            export_op.warning("No external skeleton file found.")
+            external_bones = None
 
-    drawable_dict = drawable_dict_to_obj(ydd_xml, filepath, import_settings)
-    if import_settings.join_geometries:
-        for child in drawable_dict.children:
-            if child.sollum_type == SollumType.DRAWABLE:
-                for grandchild in child.children:
-                    if grandchild.sollum_type == SollumType.DRAWABLE_MODEL:
-                        join_drawable_geometries(grandchild)
+        drawable_obj = create_drawable_obj(
+            drawable_xml, filepath, external_bones=external_bones)
+        drawable_obj.parent = dict_obj
+
+    return dict_obj
+
+
+def create_armature_parent(name: str, skel_yft: Fragment):
+    armature = bpy.data.armatures.new(f"{name}.skel")
+    dict_obj = create_blender_object(
+        SollumType.DRAWABLE_DICTIONARY, name, armature)
+
+    create_drawable_skel(skel_yft.drawable.skeleton, dict_obj)
+
+    rot_limits = skel_yft.drawable.joints.rotation_limits
+    if rot_limits:
+        apply_rotation_limits(rot_limits, dict_obj)
+
+    return dict_obj
+
+
+def find_first_skel(ydd_xml: DrawableDictionary) -> Optional[Skeleton]:
+    """Find first skeleton in ``ydd_xml``"""
+    for drawable_xml in ydd_xml:
+        if drawable_xml.skeleton.bones:
+            return drawable_xml.skeleton

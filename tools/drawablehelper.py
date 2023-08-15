@@ -1,10 +1,10 @@
 import bpy
-from ..ydr.shader_materials import create_shader, try_get_node, ShaderManager
-from ..sollumz_properties import SollumType, SOLLUMZ_UI_NAMES, MaterialType, LODLevel
-from ..tools.blenderhelper import join_objects, get_children_recursive, duplicate_object
-from ..cwxml.drawable import BonePropertiesManager, TextureShaderParameter, VectorShaderParameter
 from mathutils import Vector
-from typing import Union, Optional
+from ..ydr.shader_materials import create_shader, create_tinted_shader_graph, obj_has_tint_mats, try_get_node, ShaderManager
+from ..sollumz_properties import SollumType, MaterialType, LODLevel
+from ..tools.blenderhelper import create_empty_object
+from ..cwxml.drawable import BonePropertiesManager, Drawable, DrawableModel, TextureShaderParameter, VectorShaderParameter
+from typing import Union
 
 
 class MaterialConverter:
@@ -171,92 +171,15 @@ class MaterialConverter:
 
         self._replace_material()
 
+        if obj_has_tint_mats(self.obj):
+            create_tinted_shader_graph(self.obj)
+
         return self.new_material
 
     def auto_convert(self) -> bpy.types.Material:
         """Attempt to automatically determine shader name from material node setup and convert the material to a Sollumz material."""
         shader_name = self._determine_shader_name()
         return self.convert(shader_name)
-
-
-def create_drawable(sollum_type=SollumType.DRAWABLE):
-    empty = bpy.data.objects.new(SOLLUMZ_UI_NAMES[sollum_type], None)
-    empty.empty_display_size = 0
-    empty.sollum_type = sollum_type
-    bpy.context.collection.objects.link(empty)
-    bpy.context.view_layer.objects.active = bpy.data.objects[empty.name]
-
-    return empty
-
-
-def convert_selected_to_drawable(objs, use_names=False, multiple=False, do_center=True):
-    parent = None
-
-    center = Vector()
-    dobjs = []
-
-    if not multiple:
-        dobj = create_drawable()
-        dobjs.append(dobj)
-        if do_center:
-            for obj in objs:
-                center += obj.location
-
-            center /= len(objs)
-            dobj.location = center
-        dmobj = create_drawable(SollumType.DRAWABLE_MODEL)
-        dmobj.parent = dobj
-
-    for obj in objs:
-
-        if obj.type != "MESH":
-            raise Exception(
-                f"{obj.name} cannot be converted because it has no mesh data.")
-
-        if multiple:
-            dobj = parent or create_drawable()
-            dobjs.append(dobj)
-            if do_center:
-                dobj.location = obj.location
-                obj.location = Vector()
-            dmobj = create_drawable(SollumType.DRAWABLE_MODEL)
-            dmobj.parent = dobj
-        elif do_center:
-            obj.location -= center
-
-        obj.parent = dmobj
-
-        name = obj.name
-
-        if use_names:
-            obj.name = name + "_old"
-            dobj.name = name
-
-        obj.sollum_type = SollumType.DRAWABLE_GEOMETRY
-
-        new_obj = obj.copy()
-        # add color layer
-        if len(new_obj.data.vertex_colors) == 0:
-            new_obj.data.vertex_colors.new()
-        # add object to collection
-        bpy.data.objects.remove(obj, do_unlink=True)
-        bpy.context.collection.objects.link(new_obj)
-        new_obj.name = name + "_geom"
-
-    return dobjs
-
-
-def join_drawable_geometries(drawable):
-    join_objects(get_drawable_geometries(drawable))
-
-
-def get_drawable_geometries(drawable):
-    cobjs = []
-    children = get_children_recursive(drawable)
-    for obj in children:
-        if obj.sollum_type == SollumType.DRAWABLE_GEOMETRY:
-            cobjs.append(obj)
-    return cobjs
 
 
 def set_recommended_bone_properties(bone):
@@ -275,31 +198,64 @@ def set_recommended_bone_properties(bone):
         flag.name = flag_name
 
 
-def drawable_to_asset(drawable_obj: bpy.types.Object, name: Optional[str] = None):
-    """Creates an asset from the drawable's high LOD."""
-    mesh_objs = []
+def convert_obj_to_drawable(obj: bpy.types.Object):
+    drawable_obj = create_empty_object(SollumType.DRAWABLE)
+    drawable_obj.location = obj.location
 
-    for child in drawable_obj.children:
-        if child.sollum_type != SollumType.DRAWABLE_MODEL or child.drawable_model_properties.sollum_lod != LODLevel.HIGH:
-            continue
+    obj_name = obj.name
 
-        mesh_objs.extend([duplicate_object(obj)
-                         for obj in child.children if obj.type == "MESH"])
+    convert_obj_to_model(obj)
+    obj.name = f"{obj.name}.model"
+    # Set drawable obj name after converting obj to a model to avoid .00# suffix
+    drawable_obj.name = obj_name
 
-    joined_obj = join_objects(mesh_objs)
+    drawable_obj.parent = obj.parent
+    obj.parent = drawable_obj
+    obj.location = Vector()
 
-    joined_obj.modifiers.clear()
-    joined_obj.parent = None
+    return drawable_obj
 
-    joined_obj.name = name or drawable_obj.name
 
-    joined_obj.asset_mark()
-    joined_obj.asset_generate_preview()
+def convert_objs_to_single_drawable(objs: list[bpy.types.Object]):
+    drawable_obj = create_empty_object(SollumType.DRAWABLE)
 
-    bpy.context.collection.objects.unlink(joined_obj)
+    for obj in objs:
+        convert_obj_to_model(obj)
+        obj.name = f"{obj.name}.model"
+        obj.parent = drawable_obj
 
-    for child in drawable_obj.children_recursive:
-        bpy.data.objects.remove(child)
+    return drawable_obj
 
-    bpy.data.objects.remove(drawable_obj)
-    bpy.data.orphans_purge(do_recursive=True)
+
+def convert_obj_to_model(obj: bpy.types.Object):
+    obj.sollum_type = SollumType.DRAWABLE_MODEL
+    obj.sollumz_lods.add_empty_lods()
+    obj.sollumz_lods.set_lod_mesh(LODLevel.HIGH, obj.data)
+    obj.sollumz_lods.set_active_lod(LODLevel.HIGH)
+
+
+def center_drawable_to_models(drawable_obj: bpy.types.Object):
+    model_objs = [
+        child for child in drawable_obj.children if child.sollum_type == SollumType.DRAWABLE_MODEL]
+
+    center = Vector()
+
+    for obj in model_objs:
+        center += obj.location
+
+    center /= len(model_objs)
+
+    drawable_obj.location = center
+
+    for obj in model_objs:
+        obj.location -= center
+
+
+def get_model_xmls_by_lod(drawable_xml: Drawable) -> dict[LODLevel, DrawableModel]:
+    return {
+        LODLevel.VERYHIGH: drawable_xml.hi_models,
+        LODLevel.HIGH: drawable_xml.drawable_models_high,
+        LODLevel.MEDIUM: drawable_xml.drawable_models_med,
+        LODLevel.LOW: drawable_xml.drawable_models_low,
+        LODLevel.VERYLOW: drawable_xml.drawable_models_vlow,
+    }

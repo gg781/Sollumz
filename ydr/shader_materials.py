@@ -1,5 +1,5 @@
+from typing import Optional
 import bpy
-from ..tools.version import USE_LEGACY
 from ..cwxml.shader import ShaderManager
 from ..sollumz_properties import MaterialType
 from collections import namedtuple
@@ -94,15 +94,13 @@ def organize_loose_nodes(node_tree, start_x, start_y):
         grid_x -= node.width + 25
 
 
-def get_tinted_sampler(mat):  # move to blenderhelper.py?
+def get_tint_sampler_node(mat: bpy.types.Material) -> Optional[bpy.types.ShaderNodeTexImage]:
     nodes = mat.node_tree.nodes
     for node in nodes:
-        if node.name in ("TintPaletteSampler", "TextureSamplerDiffPal"):
-            if node.image:
-                return node.image
-            else:
-                return None  # return none because that means it has the tinted sampler parameter but no image
-    return None  # return none because that means it has no parameter which means it isnt a tinted shader
+        if node.name in ("TintPaletteSampler", "TextureSamplerDiffPal") and isinstance(node, bpy.types.ShaderNodeTexImage):
+            return node
+
+    return None
 
 
 def get_detail_extra_sampler(mat):  # move to blenderhelper.py?
@@ -113,47 +111,83 @@ def get_detail_extra_sampler(mat):  # move to blenderhelper.py?
     return None
 
 
-def create_tinted_texture_from_image(img):  # move to blenderhelper.py?
-    bpy.ops.texture.new()
-    txt = bpy.data.textures[len(bpy.data.textures) - 1]
-    if img is not None:
-        txt.image = img
-    txt.use_interpolation = False
-    txt.use_mipmap = False
-    txt.use_alpha = False
-    txt.name = img.name + "_texture" if img else "palette_texture"
-    return txt
+def create_tinted_shader_graph(obj: bpy.types.Object):
+    tint_mats = get_tinted_mats(obj)
 
-
-def create_tinted_shader_graph(obj):  # move to blenderhelper.py?
-    mat = obj.data.materials[0]
-    tint_img = get_tinted_sampler(mat)
-    if mat.shader_properties.filename in ShaderManager.tint_flag_2 or tint_img is None:  # check here or?
+    if not tint_mats:
         return
 
-    bpy.ops.object.select_all(action="DESELECT")
-    bpy.context.view_layer.objects.active = obj
-    obj.select_set(True)
-    bpy.ops.node.new_geometry_nodes_modifier()
+    if obj.data.color_attributes:
+        input_color_attr_name = obj.data.color_attributes[0].name
+    else:
+        input_color_attr_name = None
+
+    for mat in tint_mats:
+        tint_sampler_node = get_tint_sampler_node(mat)
+        palette_img = tint_sampler_node.image
+
+        if tint_sampler_node is None:
+            continue
+
+        tint_color_attr_name = f"TintColor ({palette_img.name})" if palette_img else "TintColor"
+
+        rename_tint_attr_node(mat.node_tree, name=tint_color_attr_name)
+
+        tint_color_attr = obj.data.attributes.new(
+            name=tint_color_attr_name, type="BYTE_COLOR", domain="CORNER")
+
+        mod = create_tint_geom_modifier(
+            obj, tint_color_attr.name, input_color_attr_name)
+
+        if palette_img is not None:
+            # create texture and get texture node
+            txt_node = mod.node_group.nodes["Image Texture"]
+            # apply texture
+            txt_node.inputs[0].default_value = palette_img
+
+
+def create_tint_geom_modifier(obj: bpy.types.Object, tint_color_attr_name: str, input_color_attr_name: Optional[str] = None):
     tnt_ng = create_tinted_geometry_graph()
-    geom = obj.modifiers["GeometryNodes"]
-    geom.node_group = tnt_ng
+    mod = obj.modifiers.new("GeometryNodes", "NODES")
+    mod.node_group = tnt_ng
 
     # set input / output variables
-    input_id = geom.node_group.inputs[1].identifier
-    geom[input_id + "_attribute_name"] = "colour0"
-    geom[input_id + "_use_attribute"] = True
-    output_id = geom.node_group.outputs[1].identifier
-    geom[output_id + "_attribute_name"] = "TintColor"
-    geom[output_id + "_use_attribute"] = True
+    input_id = tnt_ng.inputs[1].identifier
+    mod[input_id + "_attribute_name"] = input_color_attr_name if input_color_attr_name is not None else ""
+    mod[input_id + "_use_attribute"] = True
+    output_id = tnt_ng.outputs[1].identifier
+    mod[output_id + "_attribute_name"] = tint_color_attr_name
+    mod[output_id + "_use_attribute"] = True
 
-    # create texture and get texture node
-    txt = create_tinted_texture_from_image(tint_img)  # remove this??
-    txt_node = geom.node_group.nodes["Image Texture"]
-    # apply texture
-    txt_node.inputs[0].default_value = txt.image
+    return mod
 
-    obj.data.vertex_colors.new(name="TintColor")
+
+def rename_tint_attr_node(node_tree: bpy.types.NodeTree, name: str):
+    for node in node_tree.nodes:
+        if not isinstance(node, bpy.types.ShaderNodeAttribute) or node.attribute_name != "TintColor":
+            continue
+
+        node.attribute_name = name
+        return
+
+
+def get_tinted_mats(obj: bpy.types.Object) -> list[bpy.types.Material]:
+    if obj.data is None or not obj.data.materials:
+        return []
+
+    return [mat for mat in obj.data.materials if is_tint_material(mat)]
+
+
+def obj_has_tint_mats(obj: bpy.types.Object):
+    if not obj.data.materials:
+        return False
+
+    mat = obj.data.materials[0]
+    return is_tint_material(mat)
+
+
+def is_tint_material(mat: bpy.types.Material):
+    return mat.shader_properties.filename not in ShaderManager.tint_flag_2 and get_tint_sampler_node(mat) is not None
 
 
 def link_geos(links, node1, node2):
@@ -168,9 +202,9 @@ def create_tinted_geometry_graph():  # move to blenderhelper.py?
 
     # Create the necessary sockets for the node group
     gnt.inputs.new("NodeSocketGeometry", "Geometry")
-    gnt.inputs.new("NodeSocketVector", "Vector")
+    gnt.inputs.new("NodeSocketVector", "Vertex Colors")
     gnt.outputs.new("NodeSocketGeometry", "Geometry")
-    gnt.outputs.new("NodeSocketColor", "Color")
+    gnt.outputs.new("NodeSocketColor", "Tint Color")
 
     # link input / output node to create geometry socket
     cptn = gnt.nodes.new("GeometryNodeCaptureAttribute")
@@ -317,7 +351,7 @@ def link_detailed_normal(node_tree, bumptex, dtltex, spectex):
         mathns.append(math)
     nrm = node_tree.nodes.new("ShaderNodeNormalMap")
 
-    attr.attribute_name = "texcoord0"
+    attr.attribute_name = "UVMap 0"
     links.new(attr.outputs[1], mathns[0].inputs[0])
 
     links.new(dsz.outputs[0], comxyz.inputs[0])
@@ -480,7 +514,7 @@ def create_decal_nodes(node_tree, texture, decalflag):
         links.new(texture.outputs["Alpha"], mix.inputs["Fac"])
     if decalflag == 1:
         vcs = node_tree.nodes.new("ShaderNodeVertexColor")
-        vcs.layer_name = "colour0"  # set in create shader???
+        vcs.layer_name = "Color 1"  # set in create shader???
         multi = node_tree.nodes.new("ShaderNodeMath")
         multi.operation = "MULTIPLY"
         links.new(vcs.outputs["Alpha"], multi.inputs[0])
@@ -759,12 +793,12 @@ def create_terrain_shader(mat, shader, filename):
         links.new(tm.outputs[0], seprgb.inputs[0])
     else:
         attr_c1 = node_tree.nodes.new("ShaderNodeAttribute")
-        attr_c1.attribute_name = "colour1"
+        attr_c1.attribute_name = "Color 2"
         links.new(attr_c1.outputs[0], mixns[0].inputs[1])
         links.new(attr_c1.outputs[0], mixns[0].inputs[2])
 
         attr_c0 = node_tree.nodes.new("ShaderNodeAttribute")
-        attr_c0.attribute_name = "colour0"
+        attr_c0.attribute_name = "Color 1"
         links.new(attr_c0.outputs[3], mixns[0].inputs[0])
         links.new(mixns[0].outputs[0], seprgb.inputs[0])
 
@@ -804,7 +838,7 @@ def create_terrain_shader(mat, shader, filename):
     # assign lookup sampler last so that it overwrites any socket connections
     if tm:
         attr_t1 = node_tree.nodes.new("ShaderNodeAttribute")
-        attr_t1.attribute_name = "texcoord1"
+        attr_t1.attribute_name = "UVMap 1"
         links.new(attr_t1.outputs[1], tm.inputs[0])
         links.new(tm.outputs[0], mixns[0].inputs[1])
 

@@ -138,7 +138,7 @@ class ElementTree(Element):
     def __setattr__(self, name: str, value) -> None:
         # Get the full object
         obj = self.__getattribute__(name, False)
-        if obj and isinstance(obj, (ElementProperty, AttributeProperty)) and not isinstance(value, (ElementProperty, AttributeProperty)):
+        if obj is not None and isinstance(obj, (ElementProperty, AttributeProperty)) and not isinstance(value, (ElementProperty, AttributeProperty)):
             # If the object is an ElementProperty or AttributeProperty, set it's value
             obj.value = value
             super().__setattr__(name, obj)
@@ -301,10 +301,7 @@ class ColorProperty(ElementProperty):
 
     @staticmethod
     def from_xml(element: ET.Element):
-        if not all(x in element.attrib.keys() for x in ["r", "g", "b"]):
-            return ColorProperty.read_value_error(element)
-
-        return ColorProperty(element.tag, [float(element.get("r")), float(element.get("g")), float(element.get("b"))])
+        return ColorProperty(element.tag, [float(element.get("r", default=0)), float(element.get("g", default=0)), float(element.get("b", default=0))])
 
     def to_xml(self):
         r = str(int(self.value.r))
@@ -322,9 +319,9 @@ class Vector2Property(ElementProperty):
     @staticmethod
     def from_xml(element: ET.Element):
         if not all(x in element.attrib.keys() for x in ["x", "y"]):
-            return VectorProperty.read_value_error(element)
+            return Vector2Property.read_value_error(element)
 
-        return VectorProperty(element.tag, Vector((float(element.get("x")), float(element.get("y")))))
+        return Vector2Property(element.tag, Vector((float(element.get("x", default=0)), float(element.get("y", default=0)))))
 
     def to_xml(self):
         x = str(float32(self.value.x))
@@ -340,10 +337,7 @@ class VectorProperty(ElementProperty):
 
     @staticmethod
     def from_xml(element: ET.Element):
-        if not all(x in element.attrib.keys() for x in ["x", "y", "z"]):
-            return VectorProperty.read_value_error(element)
-
-        return VectorProperty(element.tag, Vector((float(element.get("x")), float(element.get("y")), float(element.get("z")))))
+        return VectorProperty(element.tag, Vector((float(element.get("x", default=0)), float(element.get("y", default=0)), float(element.get("z", default=0)))))
 
     def to_xml(self):
         x = str(float32(self.value.x))
@@ -360,10 +354,7 @@ class Vector4Property(ElementProperty):
 
     @staticmethod
     def from_xml(element: ET.Element):
-        if not all(x in element.attrib.keys() for x in ["x", "y", "z", "w"]):
-            return VectorProperty.read_value_error(element)
-
-        return VectorProperty(element.tag, Vector((float(element.get("x")), float(element.get("y")), float(element.get("z")), float(element.get("w")))))
+        return Vector4Property(element.tag, Vector((float(element.get("x", default=0)), float(element.get("y", default=0)), float(element.get("z", default=0)), float(element.get("w", default=0)))))
 
     def to_xml(self):
         x = str(float32(self.value.x))
@@ -396,11 +387,9 @@ class QuaternionProperty(ElementProperty):
 
 class MatrixProperty(ElementProperty):
     value_types = (Matrix)
-    size = 4
 
-    def __init__(self, tag_name: str, value=None, size=4):
+    def __init__(self, tag_name: str, value=None):
         super().__init__(tag_name, value or Matrix())
-        self.size = size
 
     @staticmethod
     def from_xml(element: ET.Element):
@@ -417,15 +406,16 @@ class MatrixProperty(ElementProperty):
         return MatrixProperty(element.tag, m)
 
     def to_xml(self):
-        txt = "\n"
-        for i in range(self.size):
-            txt += f"{str(self.value[i][0])} "
-            txt += f"{str(self.value[i][1])} "
-            txt += f"{str(self.value[i][2])} "
-            txt += f"{str(self.value[i][3])}"
-            txt += "\n"
+        if self.value is None:
+            return
+
+        matrix: Matrix = self.value
+
+        lines = [" ".join([str(x) for x in row]) for row in matrix]
+
         element = ET.Element(self.tag_name)
-        element.text = txt
+        element.text = "\n".join(lines)
+
         return element
 
 

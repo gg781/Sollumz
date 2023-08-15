@@ -7,17 +7,19 @@ from struct import pack
 from ..cwxml.ymap import *
 from binascii import hexlify
 from ..tools.blenderhelper import remove_number_suffix
-from ..tools.meshhelper import get_bound_center_from_bounds, get_bound_extents, get_dimensions
+from ..tools.meshhelper import get_bound_center_from_bounds, get_extents, get_dimensions
 from ..sollumz_properties import SOLLUMZ_UI_NAMES, SollumType
 from ..tools.utils import get_min_vector, get_max_vector
+from ..sollumz_preferences import get_export_settings
+from .. import logger
 
 
 def box_from_obj(obj):
     box = BoxOccluder()
 
-    bbmin, bbmax = get_bound_extents(obj)
+    bbmin, bbmax = get_extents(obj)
     center = get_bound_center_from_bounds(bbmin, bbmax)
-    dimensions = Vector(get_dimensions(bbmin, bbmax))
+    dimensions = obj.dimensions
 
     box.center_x = round(center.x * 4)
     box.center_y = round(center.y * 4)
@@ -64,11 +66,11 @@ def get_verts_from_obj(obj):
     return verts
 
 
-def model_from_obj(obj, export_op):
+def model_from_obj(obj):
     triangulate_obj(obj)
 
     model = OccludeModel()
-    model.bmin, model.bmax = get_bound_extents(obj)
+    model.bmin, model.bmax = get_extents(obj)
     model.verts = get_verts_from_obj(obj)
     model.num_verts_in_bytes = len(obj.data.vertices) * 12
     face_count = len(obj.data.polygons)
@@ -111,7 +113,7 @@ def entity_from_obj(obj):
 
 
 def calculate_extents(ymap, obj):
-    bbmin, bbmax = get_bound_extents(obj)
+    bbmin, bbmax = get_extents(obj)
 
     ymap.entities_extents_min = get_min_vector(
         ymap.entities_extents_min, bbmin)
@@ -149,13 +151,15 @@ def calculate_cargen_orient(obj):
     return 5 * math.sin(angle), 5 * math.cos(angle)
 
 
-def ymap_from_object(export_op, obj, exportpath, export_settings=None):
+def ymap_from_object(obj):
     ymap = CMapData()
     max_int = (2**31) - 1
     ymap.entities_extents_min = Vector((max_int, max_int, max_int))
     ymap.entities_extents_max = Vector((0, 0, 0))
     ymap.streaming_extents_min = Vector((max_int, max_int, max_int))
     ymap.streaming_extents_max = Vector((0, 0, 0))
+
+    export_settings = get_export_settings()
 
     for child in obj.children:
         # Entities
@@ -164,8 +168,8 @@ def ymap_from_object(export_op, obj, exportpath, export_settings=None):
                 if entity.sollum_type == SollumType.DRAWABLE:
                     ymap.entities.append(entity_from_obj(entity))
                 else:
-                    export_op.report(
-                        {'WARNING'}, f"Object {entity.name} will be skipped because it is not a {SOLLUMZ_UI_NAMES[SollumType.DRAWABLE]} type.")
+                    logger.warning(
+                        f"Object {entity.name} will be skipped because it is not a {SOLLUMZ_UI_NAMES[SollumType.DRAWABLE]} type.")
 
         # Box occluders
         if export_settings.ymap_box_occluders == False and child.sollum_type == SollumType.YMAP_BOX_OCCLUDER_GROUP:
@@ -176,8 +180,8 @@ def ymap_from_object(export_op, obj, exportpath, export_settings=None):
                     ymap.box_occluders.append(box_from_obj(cargen))
                     calculate_extents(ymap, cargen)
                 else:
-                    export_op.report(
-                        {'WARNING'}, f"Object {cargen.name} will be skipped because it is not a {SOLLUMZ_UI_NAMES[SollumType.YMAP_BOX_OCCLUDER]} type.")
+                    logger.warning(
+                        f"Object {cargen.name} will be skipped because it is not a {SOLLUMZ_UI_NAMES[SollumType.YMAP_BOX_OCCLUDER]} type.")
 
         # Model occluders
         if export_settings.ymap_model_occluders == False and child.sollum_type == SollumType.YMAP_MODEL_OCCLUDER_GROUP:
@@ -186,16 +190,16 @@ def ymap_from_object(export_op, obj, exportpath, export_settings=None):
             for model in child.children:
                 if model.sollum_type == SollumType.YMAP_MODEL_OCCLUDER:
                     if len(model.data.vertices) > 256:
-                        export_op.report(
-                            {"ERROR"}, message=f"Object {model.name} has too many vertices and will be skipped. It can not have more than 256 vertices.")
+                        logger.warning(
+                            f"Object {model.name} has too many vertices and will be skipped. It can not have more than 256 vertices.")
                         continue
 
                     ymap.occlude_models.append(
-                        model_from_obj(model, export_op))
+                        model_from_obj(model))
                     calculate_extents(ymap, model)
                 else:
-                    export_op.report(
-                        {'WARNING'}, f"Object {model.name} will be skipped because it is not a {SOLLUMZ_UI_NAMES[SollumType.YMAP_MODEL_OCCLUDER]} type.")
+                    logger.warning(
+                        f"Object {model.name} will be skipped because it is not a {SOLLUMZ_UI_NAMES[SollumType.YMAP_MODEL_OCCLUDER]} type.")
 
         # TODO: physics_dictionaries
 
@@ -207,8 +211,8 @@ def ymap_from_object(export_op, obj, exportpath, export_settings=None):
                 if cargen.sollum_type == SollumType.YMAP_CAR_GENERATOR:
                     ymap.car_generators.append(cargen_from_obj(cargen))
                 else:
-                    export_op.report(
-                        {'WARNING'}, f"Object {cargen.name} will be skipped because it is not a {SOLLUMZ_UI_NAMES[SollumType.YMAP_CAR_GENERATOR]} type.")
+                    logger.warning(
+                        f"Object {cargen.name} will be skipped because it is not a {SOLLUMZ_UI_NAMES[SollumType.YMAP_CAR_GENERATOR]} type.")
 
         # TODO: lod ligths
 
@@ -231,6 +235,6 @@ def ymap_from_object(export_op, obj, exportpath, export_settings=None):
     return ymap
 
 
-def export_ymap(export_op, obj, filepath, export_settings):
-    ymap = ymap_from_object(export_op, obj, filepath, export_settings)
+def export_ymap(obj, filepath):
+    ymap = ymap_from_object(obj)
     ymap.write_xml(filepath)

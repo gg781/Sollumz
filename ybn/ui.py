@@ -6,34 +6,87 @@ from ..sollumz_ui import SOLLUMZ_PT_OBJECT_PANEL, SOLLUMZ_PT_MAT_PANEL
 from . import operators as ybn_ops
 
 
-def draw_collision_material_properties(self, context):
-    obj = context.active_object
-    if not obj:
-        return
-    mat = obj.active_material
-    if mat and mat.sollum_type == MaterialType.COLLISION:
-        grid = self.layout.grid_flow(
-            columns=2, even_columns=True, even_rows=True)
-        for prop in CollisionProperties.__annotations__:
-            if prop == "collision_index":
-                continue
-            grid.prop(mat.collision_properties, prop)
-
-
 def generate_flags(layout, prop):
     grid = layout.grid_flow(columns=4, even_columns=True, even_rows=True)
     for prop_name in BoundFlags.__annotations__:
         grid.prop(prop, prop_name)
 
 
-def draw_bound_properties(self, context):
-    obj = context.active_object
-    if obj and obj.sollum_type in BOUND_TYPES:
-        grid = self.layout.grid_flow(columns=2, row_major=True)
-        for prop in BoundProperties.__annotations__:
-            if "unk_float" in prop:
-                continue
-            grid.prop(obj.bound_properties, prop)
+class SOLLUMZ_PT_COL_MAT_PROPERTIES_PANEL(bpy.types.Panel):
+    bl_label = "Collision Material Properties"
+    bl_idname = "SOLLUMZ_PT_COL_MAT_PROPERTIES_PANEL"
+    bl_space_type = "PROPERTIES"
+    bl_region_type = "WINDOW"
+    bl_options = {"HIDE_HEADER"}
+    bl_parent_id = SOLLUMZ_PT_MAT_PANEL.bl_idname
+
+    bl_order = 0
+
+    @classmethod
+    def poll(cls, context):
+        aobj = context.active_object
+
+        if aobj is None:
+            return False
+
+        active_mat = aobj.active_material
+        return active_mat is not None and active_mat.sollum_type == MaterialType.COLLISION
+
+    def draw(self, context):
+        layout = self.layout
+        layout.use_property_split = True
+        layout.use_property_decorate = False
+
+        if not self.is_valid_col_obj(context.active_object):
+            layout.label(
+                text="Only Bound Geometry or Bound Polygon objects have collision properties.", icon="INFO")
+            return
+
+        mat = context.active_object.active_material
+
+        grid = self.layout.grid_flow(
+            columns=2, even_columns=True, even_rows=True)
+
+        grid.prop(mat.collision_properties, "procedural_id")
+        grid.prop(mat.collision_properties, "room_id")
+        grid.prop(mat.collision_properties, "ped_density")
+        grid.prop(mat.collision_properties, "material_color_index")
+
+    def is_valid_col_obj(self, obj: bpy.types.Object):
+        return obj.sollum_type in [SollumType.BOUND_GEOMETRY, *BOUND_POLYGON_TYPES]
+
+
+class SOLLUMZ_PT_BOUND_PROPERTIES_PANEL(bpy.types.Panel):
+    bl_label = "Bound Properties"
+    bl_idname = "SOLLUMZ_PT_BOUND_PROPERTIES_PANEL"
+    bl_space_type = "PROPERTIES"
+    bl_region_type = "WINDOW"
+    bl_options = {"HIDE_HEADER"}
+    bl_parent_id = SOLLUMZ_PT_OBJECT_PANEL.bl_idname
+
+    bl_order = 0
+
+    @classmethod
+    def poll(cls, context):
+        return context.active_object is not None and context.active_object.sollum_type in BOUND_TYPES
+
+    def draw(self, context):
+        layout = self.layout
+        layout.use_property_split = True
+        layout.use_property_decorate = False
+
+        obj = context.active_object
+
+        grid = layout.grid_flow(columns=2, row_major=True)
+
+        grid.prop(obj.bound_properties, "procedural_id")
+        grid.prop(obj.bound_properties, "room_id")
+        grid.prop(obj.bound_properties, "ped_density")
+        grid.prop(obj.bound_properties, "poly_flags")
+        grid.prop(obj.bound_properties, "inertia")
+        grid.prop(obj.bound_properties, "volume")
+        grid.prop(obj.bound_properties, "unk_flags")
+
         if obj.sollum_type == SollumType.BOUND_GEOMETRY:
             grid.prop(obj.bound_properties, "unk_float_1")
             grid.prop(obj.bound_properties, "unk_float_2")
@@ -46,7 +99,9 @@ class SOLLUMZ_PT_BOUND_SHAPE_PANEL(bpy.types.Panel):
     bl_region_type = "WINDOW"
     bl_context = "object"
     bl_options = {"DEFAULT_CLOSED"}
-    bl_parent_id = "SOLLUMZ_PT_MAIN_PANEL"
+    bl_parent_id = SOLLUMZ_PT_BOUND_PROPERTIES_PANEL.bl_idname
+
+    bl_order = 0
 
     @classmethod
     def poll(self, context):
@@ -55,11 +110,14 @@ class SOLLUMZ_PT_BOUND_SHAPE_PANEL(bpy.types.Panel):
 
     def draw(self, context):
         obj = context.active_object
+
         self.layout.use_property_split = True
+        self.layout.use_property_decorate = False
+
         grid = self.layout.grid_flow(columns=2, row_major=True)
+
         if not obj.sollum_type in [SollumType.BOUND_GEOMETRY, SollumType.BOUND_GEOMETRYBVH, SollumType.BOUND_BOX, SollumType.BOUND_POLY_BOX, SollumType.BOUND_POLY_TRIANGLE]:
-            grid.prop(obj, "bound_radius",
-                      text="SphereRadius" if obj.sollum_type in BOUND_TYPES else "Radius")
+            grid.prop(obj, "bound_radius")
         if obj.sollum_type == SollumType.BOUND_CYLINDER or obj.sollum_type == SollumType.BOUND_POLY_CYLINDER or obj.sollum_type == SollumType.BOUND_POLY_CAPSULE:
             grid.prop(obj, "bound_length")
         if obj.sollum_type == SollumType.BOUND_BOX:
@@ -75,12 +133,14 @@ class SOLLUMZ_PT_BOUND_FLAGS_PANEL(bpy.types.Panel):
     bl_region_type = "WINDOW"
     bl_context = "object"
     bl_options = {"DEFAULT_CLOSED"}
-    bl_parent_id = "SOLLUMZ_PT_MAIN_PANEL"
+    bl_parent_id = SOLLUMZ_PT_BOUND_PROPERTIES_PANEL.bl_idname
+
+    bl_order = 1
 
     @classmethod
     def poll(self, context):
         obj = context.active_object
-        return obj and (obj.sollum_type == SollumType.BOUND_GEOMETRY or obj.sollum_type == SollumType.BOUND_GEOMETRYBVH or obj.sollum_type == SollumType.BOUND_BOX or obj.sollum_type == SollumType.BOUND_SPHERE or obj.sollum_type == SollumType.BOUND_CAPSULE)
+        return obj is not None and obj.parent is not None and obj.parent.sollum_type == SollumType.BOUND_COMPOSITE and obj.sollum_type in BOUND_TYPES
 
     def draw(self, context):
         obj = context.active_object
@@ -99,12 +159,15 @@ class SOLLUMZ_PT_MATERIAL_COL_FLAGS_PANEL(bpy.types.Panel):
     bl_region_type = "WINDOW"
     bl_context = "object"
     bl_options = {"DEFAULT_CLOSED"}
-    bl_parent_id = "SOLLUMZ_PT_MAT_PANEL"
+    bl_parent_id = SOLLUMZ_PT_COL_MAT_PROPERTIES_PANEL.bl_idname
+
+    bl_order = 1
 
     @classmethod
     def poll(cls, context):
-        mat = context.active_object.active_material
-        return mat and mat.sollum_type == MaterialType.COLLISION
+        obj = context.active_object
+        mat = obj.active_material
+        return mat and mat.sollum_type == MaterialType.COLLISION and obj.sollum_type in [SollumType.BOUND_GEOMETRY, *BOUND_POLYGON_TYPES]
 
     def draw(self, context):
         mat = context.active_object.active_material
@@ -147,7 +210,7 @@ class SOLLUMZ_UL_FLAG_PRESET_LIST(bpy.types.UIList):
 
 
 class SOLLUMZ_PT_COLLISION_TOOL_PANEL(bpy.types.Panel):
-    bl_label = "Collision Tools"
+    bl_label = "Collisions"
     bl_idname = "SOLLUMZ_PT_COLLISION_TOOL_PANEL"
     bl_category = "Sollumz Tools"
     bl_space_type = "VIEW_3D"
@@ -199,23 +262,34 @@ class SOLLUMZ_PT_CREATE_BOUND_PANEL(bpy.types.Panel):
 
     def draw(self, context):
         layout = self.layout
+
         row = layout.row()
-        row.operator(ybn_ops.SOLLUMZ_OT_create_bound.bl_idname)
-        row.prop(context.scene, "create_bound_type")
+        row.operator(ybn_ops.SOLLUMZ_OT_convert_to_composite.bl_idname,
+                     icon="FILE_REFRESH")
+        row.prop(context.scene, "bound_child_type")
+
         row = layout.row()
-        row.operator(ybn_ops.SOLLUMZ_OT_create_polygon_bound.bl_idname)
-        if context.active_object and context.active_object.mode == "EDIT":
-            row.prop(context.scene, "poly_bound_type_verts")
-            row.prop(context.scene, "poly_parent", expand=True)
-        else:
-            row.prop(context.scene, "create_poly_bound_type")
-        grid = layout.grid_flow(columns=3, even_columns=True, even_rows=True)
-        grid.prop(context.scene, "use_mesh_name")
-        grid.prop(context.scene, "create_seperate_objects")
-        grid.prop(context.scene, "composite_replace_original")
-        grid.prop(context.scene, "composite_create_bvh")
-        grid.prop(context.scene, "create_center_to_selection")
-        grid.prop(context.scene, "composite_apply_default_flag_preset")
+        row.prop(context.scene, "create_seperate_composites")
+        row.prop(context.scene, "composite_apply_default_flag_preset")
+        row.prop(context.scene, "center_composite_to_selection")
+
+        layout.separator()
+
+        row = layout.row()
+        row.operator(ybn_ops.SOLLUMZ_OT_create_bound.bl_idname, icon="CUBE")
+        row.prop(context.scene, "create_bound_type", text="")
+
+        row = layout.row()
+        row.operator(
+            ybn_ops.SOLLUMZ_OT_create_polygon_bound.bl_idname, icon="MESH_CAPSULE")
+        row.prop(context.scene, "create_poly_bound_type", text="")
+
+        layout.separator()
+
+        row = layout.row()
+        row.operator(
+            ybn_ops.SOLLUMZ_OT_create_polygon_box_from_verts.bl_idname, icon="GROUP_VERTEX")
+        row.prop(context.scene, "poly_bound_type_verts", text="")
 
 
 class SOLLUMZ_PT_CREATE_MATERIAL_PANEL(bpy.types.Panel):
@@ -276,13 +350,3 @@ class SOLLUMZ_PT_FLAG_PRESETS_PANEL(bpy.types.Panel):
         row.operator(ybn_ops.SOLLUMZ_OT_load_flag_preset.bl_idname)
         row = layout.row()
         row.operator(ybn_ops.SOLLUMZ_OT_clear_col_flags.bl_idname)
-
-
-def register():
-    SOLLUMZ_PT_OBJECT_PANEL.append(draw_bound_properties)
-    SOLLUMZ_PT_MAT_PANEL.append(draw_collision_material_properties)
-
-
-def unregister():
-    SOLLUMZ_PT_OBJECT_PANEL.remove(draw_bound_properties)
-    SOLLUMZ_PT_MAT_PANEL.remove(draw_collision_material_properties)

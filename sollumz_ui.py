@@ -1,8 +1,10 @@
 import bpy
+from .sollumz_preferences import get_addon_preferences, get_export_settings, get_import_settings, SollumzImportSettings, SollumzExportSettings
 from .sollumz_operators import SOLLUMZ_OT_copy_all_locations, SOLLUMZ_OT_copy_location, SOLLUMZ_OT_copy_rotation, SOLLUMZ_OT_paste_location
-from .tools.blenderhelper import get_armature_obj, get_addon_preferences
+from .tools.blenderhelper import get_armature_obj
 from .sollumz_properties import SollumType, MaterialType
-from typing import Tuple, Callable
+from .lods import (SOLLUMZ_OT_SET_LOD_HIGH, SOLLUMZ_OT_SET_LOD_MED, SOLLUMZ_OT_SET_LOD_LOW, SOLLUMZ_OT_SET_LOD_VLOW,
+                   SOLLUMZ_OT_SET_LOD_VERY_HIGH, SOLLUMZ_OT_HIDE_COLLISIONS, SOLLUMZ_OT_HIDE_SHATTERMAPS, SOLLUMZ_OT_HIDE_OBJECT, SOLLUMZ_OT_SHOW_COLLISIONS, SOLLUMZ_OT_SHOW_SHATTERMAPS)
 
 
 def draw_list_with_add_remove(layout: bpy.types.UILayout, add_operator: str, remove_operator: str, *temp_list_args, **temp_list_kwargs):
@@ -74,102 +76,78 @@ class FilterListHelper:
         return True
 
 
-class SOLLUMZ_PT_import_main(bpy.types.Panel):
+class SollumzFileSettingsPanel:
     bl_space_type = "FILE_BROWSER"
     bl_region_type = "TOOL_PROPS"
     bl_label = ""
     bl_parent_id = "FILE_PT_operator"
-    bl_options = {"HIDE_HEADER"}
+
+    operator_id = None
+
+    @classmethod
+    def poll(cls, context):
+        sfile = context.space_data
+        operator = sfile.active_operator
+
+        return operator.bl_idname == cls.operator_id
+
+    def draw(self, context):
+        layout = self.layout
+        layout.use_property_split = True
+        layout.use_property_decorate = False
+
+        self.draw_settings(layout, self.get_settings(context))
+
+    def get_settings(self, context: bpy.types.Context) -> bpy.types.ID:
+        ...
+
+    def draw_settings(self, layout: bpy.types.UILayout, settings: bpy.types.ID):
+        ...
+
+
+class SollumzImportSettingsPanel(SollumzFileSettingsPanel):
+    operator_id = "SOLLUMZ_OT_import"
+
+    def get_settings(self, context: bpy.types.Context):
+        return get_import_settings(context)
+
+    def draw_settings(self, layout: bpy.types.UILayout, settings: SollumzImportSettings):
+        ...
+
+
+class SollumzExportSettingsPanel(SollumzFileSettingsPanel):
+    operator_id = "SOLLUMZ_OT_export"
+
+    def get_settings(self, context: bpy.types.Context):
+        return get_export_settings(context)
+
+    def draw_settings(self, layout: bpy.types.UILayout, settings: SollumzExportSettings):
+        ...
+
+
+class SOLLUMZ_PT_import_asset(bpy.types.Panel, SollumzImportSettingsPanel):
+    bl_label = "Import Asset"
     bl_order = 0
 
-    @classmethod
-    def poll(cls, context):
-        sfile = context.space_data
-        operator = sfile.active_operator
-        return operator.bl_idname == "SOLLUMZ_OT_import"
-
-    def draw(self, context):
-        layout = self.layout
-        layout.use_property_split = True
-        layout.use_property_decorate = False
-
-        sfile = context.space_data
-        operator = sfile.active_operator
-
-        layout.prop(operator.import_settings, "batch_mode")
-        layout.prop(operator.import_settings, "import_as_asset")
+    def draw_settings(self, layout: bpy.types.UILayout, settings: SollumzImportSettings):
+        layout.prop(settings, "import_as_asset")
 
 
-class SOLLUMZ_PT_import_geometry(bpy.types.Panel):
-    bl_space_type = "FILE_BROWSER"
-    bl_region_type = "TOOL_PROPS"
-    bl_label = "Geometry"
-    bl_parent_id = "FILE_PT_operator"
+class SOLLUMZ_PT_import_fragment(bpy.types.Panel, SollumzImportSettingsPanel):
+    bl_label = "Fragment"
     bl_order = 1
 
-    @classmethod
-    def poll(cls, context):
-        sfile = context.space_data
-        operator = sfile.active_operator
-        return operator.bl_idname == "SOLLUMZ_OT_import"
-
-    def draw(self, context):
-        layout = self.layout
-        layout.use_property_split = True
-        layout.use_property_decorate = False
-
-        sfile = context.space_data
-        operator = sfile.active_operator
-
-        layout.prop(operator.import_settings, "join_geometries")
+    def draw_settings(self, layout: bpy.types.UILayout, settings: SollumzImportSettings):
+        layout.prop(settings, "split_by_group")
+        layout.prop(settings, "import_with_hi")
 
 
-class SOLLUMZ_PT_import_fragment(bpy.types.Panel):
-    bl_space_type = "FILE_BROWSER"
-    bl_region_type = "TOOL_PROPS"
-    bl_label = "Fragment"
-    bl_parent_id = "FILE_PT_operator"
+class SOLLUMZ_PT_import_ydd(bpy.types.Panel, SollumzImportSettingsPanel):
+    bl_label = "Drawable Dictionary"
     bl_order = 2
 
-    @classmethod
-    def poll(cls, context):
-        sfile = context.space_data
-        operator = sfile.active_operator
-        return operator.bl_idname == "SOLLUMZ_OT_import"
-
-    def draw(self, context):
-        layout = self.layout
-        layout.use_property_split = True
-        layout.use_property_decorate = False
-
-        sfile = context.space_data
-        operator = sfile.active_operator
-
-        layout.prop(operator.import_settings, "split_by_bone")
-
-
-class SOLLUMZ_PT_import_skeleton(bpy.types.Panel):
-    bl_space_type = "FILE_BROWSER"
-    bl_region_type = "TOOL_PROPS"
-    bl_label = "Skeleton"
-    bl_parent_id = "FILE_PT_operator"
-    bl_order = 3
-
-    @classmethod
-    def poll(cls, context):
-        sfile = context.space_data
-        operator = sfile.active_operator
-        return operator.bl_idname == "SOLLUMZ_OT_import"
-
-    def draw(self, context):
-        layout = self.layout
-        layout.use_property_split = True
-        layout.use_property_decorate = False
-
-        sfile = context.space_data
-        operator = sfile.active_operator
-
-        layout.prop(operator.import_settings, "import_ext_skeleton")
+    def draw_settings(self, layout: bpy.types.UILayout, settings: SollumzImportSettings):
+        layout.prop(settings, "import_ext_skeleton")
 
 
 class SOLLUMZ_UL_armature_list(bpy.types.UIList):
@@ -194,228 +172,87 @@ class SOLLUMZ_UL_armature_list(bpy.types.UIList):
                         text=item.name, emboss=False, icon="OUTLINER_DATA_ARMATURE")
 
 
-class SOLLUMZ_PT_import_animation(bpy.types.Panel):
-    bl_space_type = "FILE_BROWSER"
-    bl_region_type = "TOOL_PROPS"
+class SOLLUMZ_PT_import_animation(bpy.types.Panel, SollumzImportSettingsPanel):
     bl_label = "Animation"
-    bl_parent_id = "FILE_PT_operator"
+    bl_order = 3
+
+    def draw_settings(self, layout: bpy.types.UILayout, settings: SollumzImportSettings):
+        armature_list_box = layout.box()
+        armature_list_box.label(text="Target skeleton")
+        armature_list_box.template_list(SOLLUMZ_UL_armature_list.bl_idname, "",
+                                        bpy.data, "armatures", settings, "selected_armature")
+
+
+class SOLLUMZ_PT_import_ymap(bpy.types.Panel, SollumzImportSettingsPanel):
+    bl_label = "Ymap"
     bl_order = 4
 
-    @classmethod
-    def poll(cls, context):
-        sfile = context.space_data
-        operator = sfile.active_operator
-        return operator.bl_idname == "SOLLUMZ_OT_import"
-
-    def draw(self, context):
-        layout = self.layout
-        layout.use_property_split = True
-        layout.use_property_decorate = False
-
-        sfile = context.space_data
-        operator = sfile.active_operator
-
-        armature_list_box = layout.box()
-
-        armature_list_box.label(text="Target skeleton")
-
-        armature_list_box.template_list(SOLLUMZ_UL_armature_list.bl_idname, "",
-                                        bpy.data, "armatures", operator.import_settings, "selected_armature")
+    def draw_settings(self, layout: bpy.types.UILayout, settings: SollumzImportSettings):
+        layout.prop(settings, "ymap_skip_missing_entities")
+        layout.prop(settings, "ymap_exclude_entities")
+        layout.prop(settings, "ymap_instance_entities")
+        layout.prop(settings, "ymap_box_occluders")
+        layout.prop(settings, "ymap_model_occluders")
+        layout.prop(settings, "ymap_car_generators")
 
 
-class SOLLUMZ_PT_import_ymap(bpy.types.Panel):
-    bl_space_type = "FILE_BROWSER"
-    bl_region_type = "TOOL_PROPS"
-    bl_label = "Ymap"
-    bl_parent_id = "FILE_PT_operator"
-    bl_order = 5
-
-    @classmethod
-    def poll(cls, context):
-        sfile = context.space_data
-        operator = sfile.active_operator
-        return operator.bl_idname == "SOLLUMZ_OT_import"
-
-    def draw(self, context):
-        layout = self.layout
-        layout.use_property_split = True
-        layout.use_property_decorate = False
-
-        sfile = context.space_data
-        operator = sfile.active_operator
-
-        layout.prop(operator.import_settings, "ymap_skip_missing_entities")
-        layout.prop(operator.import_settings, "ymap_exclude_entities")
-        layout.prop(operator.import_settings, "ymap_instance_entities")
-        layout.prop(operator.import_settings, "ymap_box_occluders")
-        layout.prop(operator.import_settings, "ymap_model_occluders")
-        layout.prop(operator.import_settings, "ymap_car_generators")
-
-
-class SOLLUMZ_PT_export_main(bpy.types.Panel):
-    bl_space_type = "FILE_BROWSER"
-    bl_region_type = "TOOL_PROPS"
-    bl_label = ""
-    bl_parent_id = "FILE_PT_operator"
-    bl_options = {"HIDE_HEADER"}
+class SOLLUMZ_PT_export_include(bpy.types.Panel, SollumzExportSettingsPanel):
+    bl_label = "Include"
     bl_order = 0
 
-    @classmethod
-    def poll(cls, context):
-        sfile = context.space_data
-        operator = sfile.active_operator
-        return operator.bl_idname == "SOLLUMZ_OT_export"
-
-    def draw(self, context):
-        layout = self.layout
-        layout.use_property_split = True
-        layout.use_property_decorate = False
-
-        sfile = context.space_data
-        operator = sfile.active_operator
-
-        row = layout.row(align=True)
-        row.prop(operator.export_settings, "batch_mode")
-        sub = row.row(align=True)
-        sub.prop(operator.export_settings, "use_batch_own_dir",
-                 text="", icon="NEWFOLDER")
+    def draw_settings(self, layout: bpy.types.UILayout, settings: SollumzExportSettings):
+        row = layout.row(heading="Limit To")
+        row.prop(settings, "limit_to_selected", text="Selected Objects")
 
 
-class SOLLUMZ_PT_export_include(bpy.types.Panel):
-    bl_space_type = "FILE_BROWSER"
-    bl_region_type = "TOOL_PROPS"
-    bl_label = "Include"
-    bl_parent_id = "FILE_PT_operator"
+class SOLLUMZ_PT_export_drawable(bpy.types.Panel, SollumzExportSettingsPanel):
+    bl_label = "Drawable"
     bl_order = 1
 
-    @classmethod
-    def poll(cls, context):
-        sfile = context.space_data
-        operator = sfile.active_operator
-        return operator.bl_idname == "SOLLUMZ_OT_export"
-
-    def draw(self, context):
-        layout = self.layout
-        layout.use_property_split = True
-        layout.use_property_decorate = False
-
-        sfile = context.space_data
-        operator = sfile.active_operator
-
-        sublayout = layout.column(heading="Limit to")
-        sublayout.enabled = (operator.export_settings.batch_mode == "OFF")
-        sublayout.prop(operator.export_settings, "use_selection")
-        sublayout.prop(operator.export_settings, "use_active_collection")
-
-        col = layout.column()
-        col.prop(operator.export_settings, "sollum_types")
-
-        layout.prop(operator.export_settings, "export_with_ytyp")
+    def draw_settings(self, layout: bpy.types.UILayout, settings: SollumzExportSettings):
+        layout.prop(settings, "auto_calculate_bone_tag")
+        layout.prop(settings, "apply_transforms")
+        layout.prop(settings, "export_with_ytyp")
 
 
-class SOLLUMZ_PT_export_exclude(bpy.types.Panel):
-    bl_space_type = "FILE_BROWSER"
-    bl_region_type = "TOOL_PROPS"
-    bl_label = "Exclude"
-    bl_parent_id = "FILE_PT_operator"
+class SOLLUMZ_PT_export_fragment(bpy.types.Panel, SollumzExportSettingsPanel):
+    bl_label = "Fragment"
     bl_order = 2
 
-    @classmethod
-    def poll(cls, context):
-        sfile = context.space_data
-        operator = sfile.active_operator
-        return operator.bl_idname == "SOLLUMZ_OT_export"
-
-    def draw(self, context):
-        layout = self.layout
-        layout.use_property_split = True
-        layout.use_property_decorate = False
-
-        sfile = context.space_data
-        operator = sfile.active_operator
-
-        layout.prop(operator.export_settings, "exclude_skeleton")
+    def draw_settings(self, layout: bpy.types.UILayout, settings: SollumzExportSettings):
+        layout.column().prop(settings, "export_lods")
 
 
-class SOLLUMZ_PT_export_fragment(bpy.types.Panel):
-    bl_space_type = "FILE_BROWSER"
-    bl_region_type = "TOOL_PROPS"
-    bl_label = "Fragment"
-    bl_parent_id = "FILE_PT_operator"
+class SOLLUMZ_PT_export_collision(bpy.types.Panel, SollumzExportSettingsPanel):
+    bl_label = "Collisions"
+    bl_order = 3
+
+    def draw_settings(self, layout: bpy.types.UILayout, settings: SollumzExportSettings):
+        layout.prop(settings, "auto_calculate_inertia")
+        layout.prop(settings, "auto_calculate_volume")
+
+
+class SOLLUMZ_PT_export_ydd(bpy.types.Panel, SollumzExportSettingsPanel):
+    bl_label = "Drawable Dictionary"
     bl_order = 4
 
-    @classmethod
-    def poll(cls, context):
-        sfile = context.space_data
-        operator = sfile.active_operator
-        return operator.bl_idname == "SOLLUMZ_OT_export"
-
-    def draw(self, context):
-        layout = self.layout
-        layout.use_property_split = True
-        layout.use_property_decorate = False
-
-        sfile = context.space_data
-        operator = sfile.active_operator
-
-        layout.prop(operator.export_settings, "export_with_hi")
-        layout.prop(operator.export_settings, "auto_calculate_inertia")
-        layout.prop(operator.export_settings, "auto_calculate_volume")
+    def draw_settings(self, layout: bpy.types.UILayout, settings: SollumzExportSettings):
+        layout.prop(settings, "exclude_skeleton")
 
 
-class SOLLUMZ_PT_export_ymap(bpy.types.Panel):
-    bl_space_type = "FILE_BROWSER"
-    bl_region_type = "TOOL_PROPS"
+class SOLLUMZ_PT_export_ymap(bpy.types.Panel, SollumzExportSettingsPanel):
     bl_label = "Ymap"
-    bl_parent_id = "FILE_PT_operator"
     bl_order = 5
 
-    @classmethod
-    def poll(cls, context):
-        sfile = context.space_data
-        operator = sfile.active_operator
-        return operator.bl_idname == "SOLLUMZ_OT_export"
-
-    def draw(self, context):
-        layout = self.layout
-        layout.use_property_split = True
-        layout.use_property_decorate = False
-
-        sfile = context.space_data
-        operator = sfile.active_operator
-
-        layout.prop(operator.export_settings, "ymap_exclude_entities")
-        layout.prop(operator.export_settings, "ymap_box_occluders")
-        layout.prop(operator.export_settings, "ymap_model_occluders")
-        layout.prop(operator.export_settings, "ymap_car_generators")
-
-
-class SOLLUMZ_PT_export_drawable(bpy.types.Panel):
-    bl_space_type = "FILE_BROWSER"
-    bl_region_type = "TOOL_PROPS"
-    bl_label = "Drawable"
-    bl_parent_id = "FILE_PT_operator"
-    bl_order = 6
-
-    @classmethod
-    def poll(cls, context):
-        sfile = context.space_data
-        operator = sfile.active_operator
-        return operator.bl_idname == "SOLLUMZ_OT_export"
-
-    def draw(self, context):
-        layout = self.layout
-        layout.use_property_split = True
-        layout.use_property_decorate = False
-
-        sfile = context.space_data
-        operator = sfile.active_operator
-
-        layout.prop(operator.export_settings, "auto_calculate_bone_tag")
+    def draw_settings(self, layout: bpy.types.UILayout, settings: SollumzExportSettings):
+        layout.prop(settings, "ymap_exclude_entities")
+        layout.prop(settings, "ymap_box_occluders")
+        layout.prop(settings, "ymap_model_occluders")
+        layout.prop(settings, "ymap_car_generators")
 
 
 class SOLLUMZ_PT_TOOL_PANEL(bpy.types.Panel):
-    bl_label = "General Tools"
+    bl_label = "General"
     bl_idname = "SOLLUMZ_PT_TOOL_PANEL"
     bl_category = "Sollumz Tools"
     bl_space_type = "VIEW_3D"
@@ -443,25 +280,37 @@ class SOLLUMZ_PT_VIEW_PANEL(bpy.types.Panel):
     bl_order = 0
 
     def draw_header(self, context):
-        self.layout.label(text="", icon="PREFERENCES")
+        self.layout.label(text="", icon="RESTRICT_VIEW_OFF")
 
     def draw(self, context):
         layout = self.layout
-        row = layout.row()
-        row.prop(context.scene, "hide_high_lods")
-        row.prop(context.scene, "hide_medium_lods")
 
-        row2 = layout.row()
-        row2.prop(context.scene, "hide_low_lods")
-        row2.prop(context.scene, "hide_collision")
+        grid = layout.grid_flow(align=True, row_major=True)
+        grid.scale_x = 0.7
+        if context.scene.sollumz_show_collisions:
+            grid.operator(SOLLUMZ_OT_HIDE_COLLISIONS.bl_idname)
+        else:
+            grid.operator(SOLLUMZ_OT_SHOW_COLLISIONS.bl_idname)
 
-        row3 = layout.row()
-        row3.prop(context.scene, "hide_very_low_lods")
-        row3.prop(context.space_data.overlay,
-                  "show_bones", text="Show Skeleton")
+        if context.scene.sollumz_show_shattermaps:
+            grid.operator(SOLLUMZ_OT_HIDE_SHATTERMAPS.bl_idname)
+        else:
+            grid.operator(SOLLUMZ_OT_SHOW_SHATTERMAPS.bl_idname)
 
-        row4 = layout.row()
-        row4.prop(context.scene, "hide_vehicle_windows")
+        layout.separator()
+
+        layout.label(text="Level of Detail")
+
+        grid = layout.grid_flow(align=True, row_major=True)
+        grid.scale_x = 0.7
+        grid.operator(SOLLUMZ_OT_SET_LOD_VERY_HIGH.bl_idname)
+        grid.operator(SOLLUMZ_OT_SET_LOD_HIGH.bl_idname)
+        grid.operator(SOLLUMZ_OT_SET_LOD_MED.bl_idname)
+        grid.operator(SOLLUMZ_OT_SET_LOD_LOW.bl_idname)
+        grid.operator(SOLLUMZ_OT_SET_LOD_VLOW.bl_idname)
+        grid.operator(SOLLUMZ_OT_HIDE_OBJECT.bl_idname)
+
+        grid.enabled = context.view_layer.objects.active is not None and context.view_layer.objects.active.mode == "OBJECT"
 
 
 class SOLLUMZ_PT_OBJ_YMAP_LOCATION(bpy.types.Panel):
@@ -570,9 +419,9 @@ class SOLLUMZ_PT_VERTEX_TOOL_PANEL(bpy.types.Panel):
                 "sollumz.paint_vertices").color = context.scene.vert_paint_color6
 
 
-class SOLLUMZ_PT_DEBUG_PANEL(bpy.types.Panel):
-    bl_label = "Debug"
-    bl_idname = "SOLLUMZ_PT_DEBUG_PANEL"
+class SOLLUMZ_PT_SET_SOLLUM_TYPE_PANEL(bpy.types.Panel):
+    bl_label = "Set Sollum Type"
+    bl_idname = "SOLLUMZ_PT_SET_SOLLUM_TYPE_PANEL"
     bl_category = "Sollumz Tools"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
@@ -581,22 +430,48 @@ class SOLLUMZ_PT_DEBUG_PANEL(bpy.types.Panel):
     bl_order = 2
 
     def draw_header(self, context):
+        self.layout.label(text="", icon="MESH_MONKEY")
+
+    def draw(self, context):
+        layout = self.layout
+        row = layout.row()
+        row.operator("sollumz.setsollumtype")
+        row.prop(context.scene, "all_sollum_type", text="")
+
+
+class SOLLUMZ_PT_DEBUG_PANEL(bpy.types.Panel):
+    bl_label = "Debug"
+    bl_idname = "SOLLUMZ_PT_DEBUG_PANEL"
+    bl_category = "Sollumz Tools"
+    bl_space_type = "VIEW_3D"
+    bl_region_type = "UI"
+    bl_options = {"DEFAULT_CLOSED"}
+    bl_parent_id = SOLLUMZ_PT_TOOL_PANEL.bl_idname
+    bl_order = 4
+
+    def draw_header(self, context):
         self.layout.label(text="", icon="PREFERENCES")
 
     def draw(self, context):
         layout = self.layout
-        layout.label(text="Sollumz Version: 1.3.1")
+
         row = layout.row()
         row.operator("sollumz.debug_hierarchy")
         row.prop(context.scene, "debug_sollum_type")
-        row = layout.row()
-        row.operator("sollumz.debug_set_sollum_type")
-        row.prop(context.scene, "all_sollum_type")
         row = layout.row()
         row.operator("sollumz.debug_fix_light_intensity")
         row.prop(context.scene, "debug_lights_only_selected")
         row = layout.row()
         row.operator("sollumz.debug_reload_entity_sets")
+
+        layout.separator()
+
+        layout.label(text="Migration")
+        layout.operator("sollumz.migratedrawable")
+        layout.label(
+            text="This will join all geometries for each LOD Level into a single object.", icon="ERROR")
+        layout.operator("sollumz.migrateboundgeoms")
+        layout.operator("sollumz.replace_armature_constraints")
 
 
 class SOLLUMZ_PT_TERRAIN_PAINTER_PANEL(bpy.types.Panel):
@@ -637,7 +512,6 @@ class SOLLUMZ_PT_OBJECT_PANEL(bpy.types.Panel):
 
         obj = context.active_object
         row = layout.row()
-        row.enabled = False
         row.prop(obj, "sollum_type")
 
         if not obj or obj.sollum_type == SollumType.NONE:
@@ -653,6 +527,7 @@ class SOLLUMZ_PT_ENTITY_PANEL(bpy.types.Panel):
     bl_context = "object"
     bl_options = {"DEFAULT_CLOSED"}
     bl_parent_id = SOLLUMZ_PT_OBJECT_PANEL.bl_idname
+    bl_order = 1
 
     @classmethod
     def poll(cls, context):
@@ -685,17 +560,21 @@ class SOLLUMZ_PT_MAT_PANEL(bpy.types.Panel):
     bl_context = "material"
     bl_options = {"DEFAULT_CLOSED"}
 
+    @classmethod
+    def poll(cls, context):
+        obj = context.active_object
+
+        return obj is not None and obj.active_material is not None
+
     def draw(self, context):
         layout = self.layout
 
         aobj = context.active_object
-        if context.active_object is None:
-            return
-
         mat = aobj.active_material
 
         if not mat or mat.sollum_type == MaterialType.NONE:
             layout.label(text="No sollumz material active.", icon="ERROR")
+            return
 
 
 class FlagsPanel:

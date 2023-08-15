@@ -10,7 +10,7 @@ class SollumType(str, Enum):
     FRAGGROUP = "sollumz_fraggroup"
     FRAGCHILD = "sollumz_fragchild"
     FRAGLOD = "sollumz_lod"
-    FRAGVEHICLEWINDOW = "sollumz_frag_vehicle_window"
+    SHATTERMAP = "sollumz_frag_vehicle_window"
 
     DRAWABLE_DICTIONARY = "sollumz_drawable_dictionary"
     DRAWABLE = "sollumz_drawable"
@@ -68,6 +68,7 @@ class MaterialType(str, Enum):
     NONE = "sollumz_material_none",
     SHADER = "sollumz_material_shader",
     COLLISION = "sollumz_material_collision"
+    SHATTER_MAP = "sollumz_material_shard"
 
 
 class TextureUsage(str, Enum):
@@ -122,6 +123,7 @@ class LODLevel(str, Enum):
     MEDIUM = "sollumz_medium"
     LOW = "sollumz_low"
     VERYLOW = "sollumz_verylow"
+    VERYHIGH = "sollumz_veryhigh"
 
 
 class EntityLodLevel(str, Enum):
@@ -155,9 +157,44 @@ class AssetType(str, Enum):
     ASSETLESS = "sollumz_asset_assetless"
 
 
+class VehicleLightID(str, Enum):
+    NONE = "none"
+    ALWAYS_ON = "0"
+    LEFT_HEADLIGHT = "1"
+    RIGHT_HEADLIGHT = "2"
+    LEFT_TAILLIGHT = "3"
+    RIGHT_TAILLIGHT = "4"
+    FRONT_LEFT_INDICATOR = "5"
+    FRONT_RIGHT_INDICATOR = "6"
+    REAR_LEFT_INDICATOR = "7"
+    REAR_RIGHT_INDICATOR = "8"
+    LEFT_BRAKELIGHT = "9"
+    RIGHT_BRAKELIGHT = "10"
+    CENTER_BRAKELIGHT = "11"
+    LEFT_REVERSE_LIGHT = "12"
+    RIGHT_REVERSE_LIGHT = "13"
+    EXTRA_FRONT_LEFT = "14"
+    EXTRA_FRONT_RIGHT = "15"
+    EXTRA_REAR_LEFT = "16"
+    EXTRA_REAR_RIGHT = "17"
+    CUSTOM = "custom"
+
+
+class VehiclePaintLayer(str, Enum):
+    NOT_PAINTABLE = "sollumz_not_paintable"
+    PRIMARY = "sollumz_primary_color"
+    SECONDARY = "sollumz_secondary_color"
+    WHEEL = "sollumz_wheel_color"
+    INTERIOR_TRIM = "sollumz_interior_trim_color"
+    INTERIOR_DASH = "sollumz_interior_dash_color"
+
+
 FRAGMENT_TYPES = [
     SollumType.FRAGMENT,
     SollumType.FRAGGROUP,
+    SollumType.FRAGCHILD,
+    SollumType.FRAGLOD,
+    SollumType.SHATTERMAP,
 ]
 
 BOUND_TYPES = [
@@ -238,7 +275,7 @@ SOLLUMZ_UI_NAMES = {
     SollumType.FRAGGROUP: "Fragment Group",
     SollumType.FRAGCHILD: "Fragment Child",
     SollumType.FRAGLOD: "Fragment LOD",
-    SollumType.FRAGVEHICLEWINDOW: "Fragment Vehicle Window",
+    SollumType.SHATTERMAP: "Shattermap",
 
     SollumType.NONE: "None",
     SollumType.DRAWABLE_DICTIONARY: "Drawable Dictionary",
@@ -271,6 +308,7 @@ SOLLUMZ_UI_NAMES = {
     MaterialType.NONE: "None",
     MaterialType.SHADER: "Sollumz Material",
     MaterialType.COLLISION: "Sollumz Collision Material",
+    MaterialType.SHATTER_MAP: "Sollumz Shatter Map",
 
     TextureUsage.UNKNOWN: "UNKNOWN",
     TextureUsage.TINTPALETTE: "TINTPALETTE",
@@ -315,10 +353,11 @@ SOLLUMZ_UI_NAMES = {
     TextureFormat.A8: "D3DFMT_A8",
     TextureFormat.L8: "D3DFMT_L8",
 
+    LODLevel.VERYHIGH: "Very High",
     LODLevel.HIGH: "High",
     LODLevel.MEDIUM: "Med",
     LODLevel.LOW: "Low",
-    LODLevel.VERYLOW: "Vlow",
+    LODLevel.VERYLOW: "Very Low",
 
     EntityLodLevel.LODTYPES_DEPTH_HD: "DEPTH HD",
     EntityLodLevel.LODTYPES_DEPTH_LOD: "DEPTH LOD",
@@ -346,15 +385,45 @@ SOLLUMZ_UI_NAMES = {
     AssetType.FRAGMENT: "Fragment",
     AssetType.DRAWABLE: "Drawable",
     AssetType.DRAWABLE_DICTIONARY: "Drawable Dictionary",
-    AssetType.ASSETLESS: "Assetless"
+    AssetType.ASSETLESS: "Assetless",
+
+    VehicleLightID.NONE: "None",
+    VehicleLightID.CUSTOM: "Custom",
+    VehicleLightID.ALWAYS_ON: "Always On",
+    VehicleLightID.LEFT_HEADLIGHT: "Left Headlight (headlight_l)",
+    VehicleLightID.RIGHT_HEADLIGHT: "Right Headlight (headlight_r)",
+    VehicleLightID.LEFT_TAILLIGHT: "Left Taillight (taillight_l)",
+    VehicleLightID.RIGHT_TAILLIGHT: "Right Taillight (taillight_r)",
+    VehicleLightID.FRONT_LEFT_INDICATOR: "Front Left Indicator (indicator_lf)",
+    VehicleLightID.FRONT_RIGHT_INDICATOR: "Front Right Indicator (indicator_rf)",
+    VehicleLightID.REAR_LEFT_INDICATOR: "Rear Left Indicator (indicator_lr)",
+    VehicleLightID.REAR_RIGHT_INDICATOR: "Rear Right Indicator (indicator_rr)",
+    VehicleLightID.LEFT_BRAKELIGHT: "Left Brakelight (brakelight_l)",
+    VehicleLightID.RIGHT_BRAKELIGHT: "Right Brakelight (brakelight_r)",
+    VehicleLightID.CENTER_BRAKELIGHT: "Center Brakelight (brakelight_m)",
+    VehicleLightID.LEFT_REVERSE_LIGHT: "Left Reversing Light (reversinglight_l)",
+    VehicleLightID.RIGHT_REVERSE_LIGHT: "Right Reversing Light (reversinglight_r)",
+    VehicleLightID.EXTRA_FRONT_LEFT: "Extra Front Left (extralight_1)",
+    VehicleLightID.EXTRA_FRONT_RIGHT: "Extra Front Right (extralight_2)",
+    VehicleLightID.EXTRA_REAR_LEFT: "Extra Rear Left (extralight_3)",
+    VehicleLightID.EXTRA_REAR_RIGHT: "Extra Rear Right (extralight_4)",
+
+    VehiclePaintLayer.NOT_PAINTABLE: "Not Paintable",
+    VehiclePaintLayer.PRIMARY: "Primary",
+    VehiclePaintLayer.SECONDARY: "Secondary",
+    VehiclePaintLayer.WHEEL: "Wheel",
+    VehiclePaintLayer.INTERIOR_DASH: "Dashboard",
+    VehiclePaintLayer.INTERIOR_TRIM: "Interior Trim"
 }
 
 
 # Generate items from provided enums
-def items_from_enums(*enums):
+def items_from_enums(*enums, exclude=None):
     items = []
     for enum in enums:
         for item in enum:
+            if exclude is not None and item in exclude:
+                continue
             if item not in SOLLUMZ_UI_NAMES:
                 raise KeyError(
                     f"UI name mapping not found for key {item} of {enum}.")
@@ -486,7 +555,7 @@ class TimeFlags(FlagPropertyGroup, bpy.types.PropertyGroup):
 
 class EntityProperties:
     archetype_name: bpy.props.StringProperty(name="Archetype Name")
-    flags: bpy.props.IntProperty(name="Flags")
+    flags: bpy.props.IntProperty(name="Flags", default=32)
     guid: bpy.props.FloatProperty(name="GUID")
     parent_index: bpy.props.IntProperty(name="Parent Index", default=-1)
     lod_dist: bpy.props.FloatProperty(name="Lod Distance", default=200)
@@ -515,314 +584,6 @@ class ObjectEntityProperties(bpy.types.PropertyGroup, EntityProperties):
     pass
 
 
-class SollumzImportSettings(bpy.types.PropertyGroup):
-    batch_mode: bpy.props.EnumProperty(
-        name="Batch Mode",
-        items=(("SELECTED_FILE", "Selected File(s)", "Import selected file(s)"),
-               ("DIRECTORY", "Directory", "Import every file from active directory the file browser is in"))
-    )
-
-    import_as_asset: bpy.props.BoolProperty(
-        name="Import as asset",
-        description="Create an asset from the .ydr/.yft high LOD.",
-        default=False,
-    )
-
-    join_geometries: bpy.props.BoolProperty(
-        name="Join Geometries",
-        description="Joins the drawables geometries into a single mesh.",
-        default=False,
-    )
-
-    split_by_bone: bpy.props.BoolProperty(
-        name="Split by Bone",
-        description="Splits the geometries by bone.",
-        default=False,
-    )
-
-    import_ext_skeleton: bpy.props.BoolProperty(
-        name="Import External Skeleton",
-        description="Imports the first found yft skeleton in the same folder as the selected file.",
-        default=False,
-    )
-
-    selected_armature: bpy.props.IntProperty(
-        name="Armature",
-        description="Armature on which the animation will be applied.",
-        default=-1,
-    )
-
-    ymap_skip_missing_entities: bpy.props.BoolProperty(
-        name="Skip Missing Entities",
-        description="If enabled, missing entities wont be created as an empty object.",
-        default=True,
-    )
-
-    ymap_exclude_entities: bpy.props.BoolProperty(
-        name="Exclude Entities",
-        description="If enabled, ignore all entities from the selected ymap(s).",
-        default=False,
-    )
-
-    ymap_box_occluders: bpy.props.BoolProperty(
-        name="Exclude Box Occluders",
-        description="If enabled, ignore all Box occluders from the selected ymap(s).",
-        default=False,
-    )
-
-    ymap_model_occluders: bpy.props.BoolProperty(
-        name="Exclude Model Occluders",
-        description="If enabled, ignore all Model occluders from the selected ymap(s).",
-        default=False,
-    )
-
-    ymap_car_generators: bpy.props.BoolProperty(
-        name="Exclude Car Generators",
-        description="If enabled, ignore all Car Generators from the selected ymap(s).",
-        default=False,
-    )
-    ymap_instance_entities: bpy.props.BoolProperty(
-        name="Instance Entities",
-        description="If enabled, instance all entities from the selected ymap(s).",
-        default=False,
-    )
-
-
-class SollumzExportSettings(bpy.types.PropertyGroup):
-    local: bpy.props.BoolProperty(
-        name="Export drawables local to position")
-    batch_mode: bpy.props.EnumProperty(
-        name="Batch Mode",
-        items=(("OFF", "Off", "Active scene"),
-               ("SCENE", "Scene", "Every scene"),
-               ("COLLECTION", "Collection",
-                "Each collection (data-block ones), does not include content of children collections"),
-               ("SCENE_COLLECTION", "Scene Collections",
-                "Each collection (including master, non-data-block ones) of each scene, "
-                "including content from children collections"),
-               ("ACTIVE_SCENE_COLLECTION", "Active Scene Collections",
-                "Each collection (including master, non-data-block one) of the active scene, "
-                "including content from children collections"),
-               ),
-    )
-
-    use_batch_own_dir: bpy.props.BoolProperty(
-        name="Batch Own Dir",
-        description="Create a new directory for each exported file",
-        default=False,
-    )
-
-    sollum_types: bpy.props.EnumProperty(
-        name="Sollum Types",
-        options={"ENUM_FLAG"},
-        items=((SollumType.DRAWABLE.value, "Drawable", ""),
-               (SollumType.DRAWABLE_DICTIONARY.value, "Drawable Dictionary", ""),
-               (SollumType.BOUND_COMPOSITE.value, "Bound", ""),
-               (SollumType.FRAGMENT.value, "Fragment", ""),
-               (SollumType.CLIP_DICTIONARY.value, "Clip Dictionary", ""),
-               (SollumType.YMAP.value, "Ymap", "")),
-        description="Which kind of sollumz objects to export",
-        default={SollumType.DRAWABLE.value,
-                 SollumType.DRAWABLE_DICTIONARY.value,
-                 SollumType.BOUND_COMPOSITE.value,
-                 SollumType.FRAGMENT.value,
-                 SollumType.CLIP_DICTIONARY.value,
-                 SollumType.YMAP.value},
-    )
-
-    use_selection: bpy.props.BoolProperty(
-        name="Selected Objects",
-        description="Export selected and visible objects only",
-        default=True,
-    )
-
-    use_active_collection: bpy.props.BoolProperty(
-        name="Active Collection",
-        description="Export only objects from the active collection (and its children)",
-        default=False,
-    )
-
-    auto_calculate_bone_tag: bpy.props.BoolProperty(
-        name="Auto Calculate Bone Tag",
-        description="Automatically calculate bone tags.",
-        default=False,
-    )
-
-    export_with_hi: bpy.props.BoolProperty(
-        name="Export With _hi",
-        description="Exports fragment with _hi file.",
-        default=False
-    )
-
-    auto_calculate_inertia: bpy.props.BoolProperty(
-        name="Auto Calculate Inertia",
-        description="Automatically calculate inertia for physics objects.",
-        default=False
-    )
-
-    auto_calculate_volume: bpy.props.BoolProperty(
-        name="Auto Calculate Volume",
-        description="Automatically calculate volume for physics objects.",
-        default=False
-    )
-
-    exclude_skeleton: bpy.props.BoolProperty(
-        name="Skeleton",
-        description="Exclude skeleton from export. Usually done with mp ped components.",
-        default=False
-    )
-
-    export_with_ytyp: bpy.props.BoolProperty(
-        name="Export with ytyp",
-        description="Exports a .ytyp.xml with an archetype for every drawable or drawable dictionary being exported.",
-        default=False
-    )
-
-    ymap_exclude_entities: bpy.props.BoolProperty(
-        name="Exclude Entities",
-        description="If enabled, ignore all Entities from the selected ymap(s).",
-        default=False,
-    )
-
-    ymap_box_occluders: bpy.props.BoolProperty(
-        name="Exclude Box Occluders",
-        description="If enabled, ignore all Box occluders from the selected ymap(s).",
-        default=False,
-    )
-
-    ymap_model_occluders: bpy.props.BoolProperty(
-        name="Exclude Model Occluders",
-        description="If enabled, ignore all Model occluders from the selected ymap(s).",
-        default=False,
-    )
-
-    ymap_car_generators: bpy.props.BoolProperty(
-        name="Exclude Car Generators",
-        description="If enabled, ignore all Car Generators from the selected ymap(s).",
-        default=False,
-    )
-
-
-class SollumzAddonPreferences(bpy.types.AddonPreferences):
-    bl_idname = __package__.split(".")[0]
-
-    scale_light_intensity: bpy.props.BoolProperty(
-        name="Scale Light Intensity", description="Scale light intensity by 500 on import/export", default=True)
-
-    show_vertex_painter: bpy.props.BoolProperty(
-        name="Show Vertex Painter", description="Show the Vertex Painter panel in General Tools (Includes Terrain Painter)", default=True)
-
-    extra_color_swatches: bpy.props.BoolProperty(
-        name="Extra Vertex Color Swatches", description="Add 3 extra color swatches to the Vertex Painter Panel (Max 6)", default=True)
-
-    def draw(self, context):
-        layout = self.layout
-        layout.prop(self, "scale_light_intensity")
-        layout.prop(self, "show_vertex_painter")
-        layout.prop(self, "extra_color_swatches")
-
-
-def get_all_collections():
-    return [bpy.context.scene.collection, *bpy.data.collections]
-
-
-def hide_obj_and_children(obj, value):
-    if obj.name in bpy.context.view_layer.objects:
-        obj.hide_set(value)
-    for child in obj.children:
-        hide_obj_and_children(child, value)
-
-
-def get_bool_prop(obj, key):
-    try:
-        return obj[key]
-    except KeyError:
-        return False
-
-
-def get_hide_collisions(self):
-    return get_bool_prop(self, "hide_collision")
-
-
-def set_hide_collisions(self, value):
-    self["hide_collision"] = value
-
-    for collection in get_all_collections():
-        for obj in collection.all_objects:
-            if obj.sollum_type in BOUND_TYPES or obj.sollum_type in BOUND_POLYGON_TYPES:
-                if obj.name in bpy.context.view_layer.objects:
-                    obj.hide_set(value)
-
-
-def get_hide_high_lods(self):
-    return get_bool_prop(self, "hide_high_lods")
-
-
-def set_hide_high_lods(self, value):
-    self["hide_high_lods"] = value
-
-    for collection in get_all_collections():
-        for obj in collection.all_objects:
-            if obj.sollum_type == SollumType.DRAWABLE_MODEL:
-                if obj.drawable_model_properties.sollum_lod == LODLevel.HIGH:
-                    hide_obj_and_children(obj, value)
-
-
-def get_hide_medium_lods(self):
-    return get_bool_prop(self, "hide_medium_lods")
-
-
-def set_hide_medium_lods(self, value):
-    self["hide_medium_lods"] = value
-
-    for collection in get_all_collections():
-        for obj in collection.all_objects:
-            if obj.sollum_type == SollumType.DRAWABLE_MODEL:
-                if obj.drawable_model_properties.sollum_lod == LODLevel.MEDIUM:
-                    hide_obj_and_children(obj, value)
-
-
-def get_hide_low_lods(self):
-    return get_bool_prop(self, "hide_low_lods")
-
-
-def set_hide_low_lods(self, value):
-    self["hide_low_lods"] = value
-
-    for collection in get_all_collections():
-        for obj in collection.all_objects:
-            if obj.sollum_type == SollumType.DRAWABLE_MODEL:
-                if obj.drawable_model_properties.sollum_lod == LODLevel.LOW:
-                    hide_obj_and_children(obj, value)
-
-
-def get_hide_very_low_lods(self):
-    return get_bool_prop(self, "hide_very_low_lods")
-
-
-def set_hide_very_low_lods(self, value):
-    self["hide_very_low_lods"] = value
-
-    for collection in get_all_collections():
-        for obj in collection.all_objects:
-            if obj.sollum_type == SollumType.DRAWABLE_MODEL:
-                if obj.drawable_model_properties.sollum_lod == LODLevel.VERYLOW:
-                    hide_obj_and_children(obj, value)
-
-
-def get_hide_vehicle_windows(self):
-    return get_bool_prop(self, "hide_vehicle_windows")
-
-
-def set_hide_vehicle_windows(self, value):
-    self["hide_vehicle_windows"] = value
-
-    for collection in get_all_collections():
-        for obj in collection.all_objects:
-            if obj.sollum_type == SollumType.FRAGVEHICLEWINDOW:
-                hide_obj_and_children(obj, value)
-
-
 def register():
     bpy.types.Object.sollum_type = bpy.props.EnumProperty(
         items=items_from_enums(SollumType),
@@ -842,19 +603,6 @@ def register():
 
     bpy.types.Object.entity_properties = bpy.props.PointerProperty(
         type=ObjectEntityProperties)
-
-    bpy.types.Scene.hide_collision = bpy.props.BoolProperty(
-        name="Hide Collision", get=get_hide_collisions, set=set_hide_collisions)
-    bpy.types.Scene.hide_high_lods = bpy.props.BoolProperty(
-        name="Hide High LODS", get=get_hide_high_lods, set=set_hide_high_lods)
-    bpy.types.Scene.hide_medium_lods = bpy.props.BoolProperty(
-        name="Hide Medium LODS", get=get_hide_medium_lods, set=set_hide_medium_lods)
-    bpy.types.Scene.hide_low_lods = bpy.props.BoolProperty(
-        name="Hide Low LODS", get=get_hide_low_lods, set=set_hide_low_lods)
-    bpy.types.Scene.hide_very_low_lods = bpy.props.BoolProperty(
-        name="Hide Very Low LODS", get=get_hide_very_low_lods, set=set_hide_very_low_lods)
-    bpy.types.Scene.hide_vehicle_windows = bpy.props.BoolProperty(
-        name="Hide Vehicle Windows", get=get_hide_vehicle_windows, set=set_hide_vehicle_windows)
 
     bpy.types.Scene.vert_paint_color1 = bpy.props.FloatVectorProperty(
         name="Vert Color 1",
@@ -912,12 +660,6 @@ def register():
 
     bpy.types.Scene.vert_paint_alpha = bpy.props.FloatProperty(
         name="Alpha", min=-1, max=1)
-    bpy.types.Scene.create_seperate_objects = bpy.props.BoolProperty(
-        name="Separate Objects", description="Create a object for each selected mesh.")
-    bpy.types.Scene.create_center_to_selection = bpy.props.BoolProperty(
-        name="Center to Selection", description="Center newly created objects to selection.", default=True)
-    bpy.types.Scene.use_mesh_name = bpy.props.BoolProperty(
-        name="Use Name(s)", description="Use the names of the meshes for the created objects.", default=True)
 
     bpy.types.Scene.debug_sollum_type = bpy.props.EnumProperty(
         items=[(SollumType.DRAWABLE.value, SOLLUMZ_UI_NAMES[SollumType.DRAWABLE], SOLLUMZ_UI_NAMES[SollumType.DRAWABLE]),
@@ -938,28 +680,12 @@ def register():
     bpy.types.Scene.debug_lights_only_selected = bpy.props.BoolProperty(
         name="Limit to Selected", description="Only set intensity of the selected lights. (All instances will be affected)")
 
-    bpy.utils.register_class(SollumzAddonPreferences)
-
 
 def unregister():
     del bpy.types.Object.sollum_type
     del bpy.types.Material.sollum_type
     del bpy.types.Object.entity_properties
-    del bpy.types.Scene.hide_collision
-    del bpy.types.Scene.hide_high_lods
-    del bpy.types.Scene.hide_medium_lods
-    del bpy.types.Scene.hide_low_lods
-    del bpy.types.Scene.hide_very_low_lods
-    del bpy.types.Scene.vert_paint_color1
-    del bpy.types.Scene.vert_paint_color2
-    del bpy.types.Scene.vert_paint_color3
-    del bpy.types.Scene.vert_paint_color4
     del bpy.types.Scene.vert_paint_alpha
-    del bpy.types.Scene.create_seperate_objects
-    del bpy.types.Scene.use_mesh_name
     del bpy.types.Scene.debug_sollum_type
     del bpy.types.Scene.all_sollum_type
-    del bpy.types.Scene.create_center_to_selection
     del bpy.types.Scene.debug_lights_only_selected
-
-    bpy.utils.unregister_class(SollumzAddonPreferences)

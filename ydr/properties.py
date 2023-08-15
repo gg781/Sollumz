@@ -1,8 +1,42 @@
 import bpy
+import os
+
+from ..tools.blenderhelper import lod_level_enum_flag_prop_factory
+from ..sollumz_helper import find_sollumz_parent
 from ..sollumz_properties import SOLLUMZ_UI_NAMES, items_from_enums, TextureUsage, TextureFormat, LODLevel, SollumType, LightType, FlagPropertyGroup, TimeFlags
 from ..ydr.shader_materials import shadermats, ShaderMaterial
 from bpy.app.handlers import persistent
 from bpy.path import basename
+
+
+class ShaderOrderItem(bpy.types.PropertyGroup):
+    # For drawable shader order list
+    index: bpy.props.IntProperty(min=0)
+    name: bpy.props.StringProperty()
+    filename: bpy.props.StringProperty()
+
+
+class DrawableShaderOrder(bpy.types.PropertyGroup):
+    items: bpy.props.CollectionProperty(type=ShaderOrderItem)
+    active_index: bpy.props.IntProperty(min=0)
+
+    def get_active_shader_item_index(self) -> int:
+        return self.items[self.active_index].index
+
+    def change_shader_index(self, old: int, new: int):
+        if new >= len(self.items):
+            return
+
+        list_ind = self.active_index
+
+        for i, item in enumerate(self.items):
+            if item.index == new:
+                item.index = old
+            elif item.index == old:
+                item.index = new
+                list_ind = i
+
+        self.active_index = list_ind
 
 
 class DrawableProperties(bpy.types.PropertyGroup):
@@ -17,19 +51,44 @@ class DrawableProperties(bpy.types.PropertyGroup):
     unknown_9A: bpy.props.FloatProperty(
         min=0, max=10000, default=9998, name="Unknown 9A")
 
+    shader_order: bpy.props.PointerProperty(type=DrawableShaderOrder)
+
 
 class DrawableModelProperties(bpy.types.PropertyGroup):
     render_mask: bpy.props.IntProperty(name="Render Mask", default=255)
     flags: bpy.props.IntProperty(name="Flags", default=0)
     unknown_1: bpy.props.IntProperty(name="Unknown 1", default=0)
     sollum_lod: bpy.props.EnumProperty(
-        items=items_from_enums(LODLevel),
+        items=items_from_enums(
+            [LODLevel.HIGH, LODLevel.MEDIUM, LODLevel.LOW, LODLevel.VERYLOW]),
         name="LOD Level",
         default="sollumz_high"
     )
 
 
+class SkinnedDrawableModelProperties(bpy.types.PropertyGroup):
+    very_high: bpy.props.PointerProperty(type=DrawableModelProperties)
+    high: bpy.props.PointerProperty(type=DrawableModelProperties)
+    medium: bpy.props.PointerProperty(type=DrawableModelProperties)
+    low: bpy.props.PointerProperty(type=DrawableModelProperties)
+    very_low: bpy.props.PointerProperty(type=DrawableModelProperties)
+
+    def get_lod(self, lod_level: LODLevel) -> DrawableModelProperties:
+        if lod_level == LODLevel.VERYHIGH:
+            return self.very_high
+        elif lod_level == LODLevel.HIGH:
+            return self.high
+        elif lod_level == LODLevel.MEDIUM:
+            return self.medium
+        elif lod_level == LODLevel.LOW:
+            return self.low
+        elif lod_level == LODLevel.VERYLOW:
+            return self.very_low
+
+
 class ShaderProperties(bpy.types.PropertyGroup):
+    index: bpy.props.IntProperty(min=0)
+
     renderbucket: bpy.props.IntProperty(name="Render Bucket", default=0)
     filename: bpy.props.StringProperty(
         name="Shader Filename", default="default.sps")
@@ -70,7 +129,7 @@ class TextureProperties(bpy.types.PropertyGroup):
     usage: bpy.props.EnumProperty(
         items=items_from_enums(TextureUsage),
         name="Usage",
-        default=TextureUsage.DIFFUSE
+        default=TextureUsage.UNKNOWN
     )
 
     format: bpy.props.EnumProperty(
@@ -87,7 +146,7 @@ class BoneFlag(bpy.types.PropertyGroup):
 
 
 class BoneProperties(bpy.types.PropertyGroup):
-    tag: bpy.props.IntProperty(name="BoneTag", default=0, min=0)
+    tag: bpy.props.IntProperty(name="Tag", default=0, min=0)
     flags: bpy.props.CollectionProperty(type=BoneFlag)
     ul_index: bpy.props.IntProperty(name="UIListIndex", default=0)
 
@@ -107,9 +166,11 @@ class LightProperties(bpy.types.PropertyGroup):
     culling_plane_offset: bpy.props.FloatProperty(name="Culling Plane Offset")
     unknown_45: bpy.props.FloatProperty(name="Unknown 45")
     unknown_46: bpy.props.FloatProperty(name="Unknown 46")
-    volume_intensity: bpy.props.FloatProperty(name="Volume Intensity", default=1.0)
+    volume_intensity: bpy.props.FloatProperty(
+        name="Volume Intensity", default=1.0)
     shadow_blur: bpy.props.FloatProperty(name="Shadow Blur")
-    volume_size_scale: bpy.props.FloatProperty(name="Volume Size Scale", default=1.0)
+    volume_size_scale: bpy.props.FloatProperty(
+        name="Volume Size Scale", default=1.0)
     volume_outer_color: bpy.props.FloatVectorProperty(
         name="Volume Outer Color", subtype="COLOR", min=0.0, max=1.0, default=(1.0, 1.0, 1.0))
     light_hash: bpy.props.IntProperty(name="Light Hash")
@@ -125,7 +186,8 @@ class LightProperties(bpy.types.PropertyGroup):
     volumetric_fade_distance: bpy.props.FloatProperty(
         name="Volumetric Fade Distance")
     shadow_near_clip: bpy.props.FloatProperty(name="Shadow Near Clip")
-    corona_intensity: bpy.props.FloatProperty(name="Corona Intensity", default=1.0)
+    corona_intensity: bpy.props.FloatProperty(
+        name="Corona Intensity", default=1.0)
     corona_z_bias: bpy.props.FloatProperty(name="Corona Z Bias", default=0.1)
     tangent: bpy.props.FloatVectorProperty(name="Tangent")
     cone_inner_angle: bpy.props.FloatProperty(name="Cone Inner Angle")
@@ -203,9 +265,9 @@ class LightFlags(FlagPropertyGroup, bpy.types.PropertyGroup):
         name="Unk32", update=FlagPropertyGroup.update_flag)
 
 
-# Handler sets the default value of the ShaderMaterials collection on blend file load
 @persistent
 def on_file_loaded(_):
+    # Handler sets the default value of the ShaderMaterials collection on blend file load
     bpy.context.scene.shader_materials.clear()
     for index, mat in enumerate(shadermats):
         item = bpy.context.scene.shader_materials.add()
@@ -236,8 +298,23 @@ def set_light_type(self, value):
 
 def get_texture_name(self):
     if self.image:
-        return basename(self.image.filepath).split(".")[0]
+        return os.path.splitext(basename(self.image.filepath))[0]
     return "None"
+
+
+def get_model_properties(model_obj: bpy.types.Object, lod_level: LODLevel) -> DrawableModelProperties:
+    drawable_obj = find_sollumz_parent(model_obj, SollumType.DRAWABLE)
+
+    if drawable_obj is not None and model_obj.vertex_groups:
+        return drawable_obj.skinned_model_properties.get_lod(lod_level)
+
+    lod = model_obj.sollumz_lods.get_lod(lod_level)
+
+    if lod is None or lod.mesh is None:
+        raise ValueError(
+            f"Failed to get Drawable Model properties: {model_obj.name} has no {SOLLUMZ_UI_NAMES[lod_level]} LOD!")
+
+    return lod.mesh.drawable_model_properties
 
 
 def register():
@@ -248,8 +325,6 @@ def register():
     bpy.app.handlers.load_post.append(on_file_loaded)
     bpy.types.Object.drawable_properties = bpy.props.PointerProperty(
         type=DrawableProperties)
-    bpy.types.Object.drawable_model_properties = bpy.props.PointerProperty(
-        type=DrawableModelProperties)
     bpy.types.Material.shader_properties = bpy.props.PointerProperty(
         type=ShaderProperties)
     bpy.types.ShaderNodeTexImage.texture_properties = bpy.props.PointerProperty(
@@ -259,22 +334,24 @@ def register():
     bpy.types.ShaderNodeTexImage.sollumz_texture_name = bpy.props.StringProperty(
         name="Texture Name", description="Name of texture.", get=get_texture_name)
 
-    bpy.types.Scene.create_drawable_type = bpy.props.EnumProperty(
-        items=[
-            (SollumType.DRAWABLE.value,
-             SOLLUMZ_UI_NAMES[SollumType.DRAWABLE], "Create a drawable object. (if objects are selected a drawable will be created with them as the children)"),
-            (SollumType.DRAWABLE_MODEL.value,
-             SOLLUMZ_UI_NAMES[SollumType.DRAWABLE_MODEL], "Create a drawable model object."),
-            (SollumType.DRAWABLE_GEOMETRY.value,
-             SOLLUMZ_UI_NAMES[SollumType.DRAWABLE_GEOMETRY], "Create a drawable geoemtry object."),
-            (SollumType.DRAWABLE_DICTIONARY.value,
-             SOLLUMZ_UI_NAMES[SollumType.DRAWABLE_DICTIONARY], "Create a drawable dictionary object."),
-        ],
-        name="Type",
-        default=SollumType.DRAWABLE.value
-    )
+    # Store properties for the DrawableModel with HasSkin=1. This is so all skinned objects share
+    # the same drawable model properties even when split by group. It seems there is only ever 1
+    # DrawableModel with HasSkin=1 in any given Drawable.
+    bpy.types.Object.skinned_model_properties = bpy.props.PointerProperty(
+        type=SkinnedDrawableModelProperties)
+    # DrawableModel properties stored per mesh for LOD system
+    bpy.types.Mesh.drawable_model_properties = bpy.props.PointerProperty(
+        type=DrawableModelProperties)
+    # For backwards compatibility
+    bpy.types.Object.drawable_model_properties = bpy.props.PointerProperty(
+        type=DrawableModelProperties)
+
+    bpy.types.Scene.create_seperate_drawables = bpy.props.BoolProperty(
+        name="Separate Objects", description="Create a separate Drawable for each selected object")
     bpy.types.Scene.auto_create_embedded_col = bpy.props.BoolProperty(
-        name="Auto-Embed Collision", description="Automatically create embedded collision.")
+        name="Auto-Embed Collision", description="Automatically create embedded static collision")
+    bpy.types.Scene.center_drawable_to_selection = bpy.props.BoolProperty(
+        name="Center to Selection", description="Center Drawable(s) to selection", default=True)
 
     bpy.types.Bone.bone_properties = bpy.props.PointerProperty(
         type=BoneProperties)
@@ -305,13 +382,27 @@ def register():
     bpy.types.Light.time_flags = bpy.props.PointerProperty(type=TimeFlags)
     bpy.types.Light.light_flags = bpy.props.PointerProperty(type=LightFlags)
 
+    bpy.types.Scene.sollumz_auto_lod_ref_mesh = bpy.props.PointerProperty(
+        type=bpy.types.Mesh, name="Reference Mesh", description="The mesh to copy and decimate for each LOD level. You'd usually want to set this as the highest LOD then run the tool for all lower LODs")
+    bpy.types.Scene.sollumz_auto_lod_levels = lod_level_enum_flag_prop_factory()
+    bpy.types.Scene.sollumz_auto_lod_decimate_step = bpy.props.FloatProperty(
+        name="Decimate Step", min=0.0, max=0.99, default=0.6)
+
+    bpy.types.Scene.sollumz_extract_lods_levels = lod_level_enum_flag_prop_factory()
+    bpy.types.Scene.sollumz_extract_lods_parent_type = bpy.props.EnumProperty(name="Parent Type", items=(
+        ("sollumz_extract_lods_parent_type_object", "Object", "Parent to an Object"),
+        ("sollumz_extract_lods_parent_type_collection",
+         "Collection", "Parent to a Collection")
+    ), default=0)
+
 
 def unregister():
     del bpy.types.ShaderNodeTexImage.sollumz_texture_name
     del bpy.types.Scene.shader_material_index
     del bpy.types.Scene.shader_materials
     del bpy.types.Object.drawable_properties
-    del bpy.types.Object.drawable_model_properties
+    del bpy.types.Mesh.drawable_model_properties
+    del bpy.types.Object.skinned_model_properties
     del bpy.types.Material.shader_properties
     del bpy.types.ShaderNodeTexImage.texture_properties
     del bpy.types.ShaderNodeTexImage.texture_flags
@@ -321,6 +412,13 @@ def unregister():
     del bpy.types.Light.time_flags
     del bpy.types.Light.light_flags
     del bpy.types.Light.is_capsule
+    del bpy.types.Scene.create_seperate_drawables
     del bpy.types.Scene.auto_create_embedded_col
+    del bpy.types.Scene.center_drawable_to_selection
+    del bpy.types.Scene.sollumz_auto_lod_ref_mesh
+    del bpy.types.Scene.sollumz_auto_lod_levels
+    del bpy.types.Scene.sollumz_auto_lod_decimate_step
+    del bpy.types.Scene.sollumz_extract_lods_levels
+    del bpy.types.Scene.sollumz_extract_lods_parent_type
 
     bpy.app.handlers.load_post.remove(on_file_loaded)

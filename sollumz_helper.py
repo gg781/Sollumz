@@ -1,18 +1,24 @@
 import bpy
 import traceback
-import os
 import time
+from typing import Optional
 from abc import abstractmethod
+from mathutils import Matrix
+
+from .sollumz_properties import SollumType
+from .tools.blenderhelper import get_bone_pose_matrix
+
+
+from .sollumz_preferences import get_export_settings
 from .tools.blenderhelper import get_children_recursive, get_object_with_children
-from .sollumz_properties import BOUND_TYPES
-from .ydr.ydrexport import get_used_materials
+from .sollumz_properties import BOUND_TYPES, SollumType, MaterialType, LODLevel
 
 
 class SOLLUMZ_OT_base:
+    # Deprecated
     bl_options = {"UNDO"}
     bl_action = "do"
     bl_showtime = False
-    bl_update_view = False
 
     def __init__(self):
         self.messages = []
@@ -25,8 +31,6 @@ class SOLLUMZ_OT_base:
         start = time.time()
         try:
             result = self.run(context)
-            if self.bl_update_view:
-                reset_sollumz_view(context.scene)
         except:
             result = False
             self.error(
@@ -65,20 +69,6 @@ def set_object_collection(obj):
         target.objects.link(obj)
 
 
-def reset_sollumz_view(scene):
-    scene.hide_collision = not scene.hide_collision
-    scene.hide_high_lods = not scene.hide_high_lods
-    scene.hide_medium_lods = not scene.hide_medium_lods
-    scene.hide_low_lods = not scene.hide_low_lods
-    scene.hide_very_low_lods = not scene.hide_very_low_lods
-
-    scene.hide_collision = not scene.hide_collision
-    scene.hide_high_lods = not scene.hide_high_lods
-    scene.hide_medium_lods = not scene.hide_medium_lods
-    scene.hide_low_lods = not scene.hide_low_lods
-    scene.hide_very_low_lods = not scene.hide_very_low_lods
-
-
 def get_sollumz_objects_from_objects(objs, sollum_type):
     robjs = []
     for obj in objs:
@@ -90,16 +80,8 @@ def get_sollumz_objects_from_objects(objs, sollum_type):
     return robjs
 
 
-def find_fragment_file(filepath):
-    directory = os.path.dirname(filepath)
-    for file in os.listdir(directory):
-        if file.endswith(".yft.xml"):
-            return os.path.join(directory, file)
-    return None
-
-
 def has_embedded_textures(obj):
-    for mat in get_used_materials(obj):
+    for mat in get_sollumz_materials(obj):
         nodes = mat.node_tree.nodes
         for node in nodes:
             if isinstance(node, bpy.types.ShaderNodeTexImage):
@@ -128,3 +110,71 @@ def duplicate_object_with_children(obj):
     for new_obj in new_objs:
         bpy.context.scene.collection.objects.link(new_obj)
     return new_objs[0]
+
+
+def find_sollumz_parent(obj: bpy.types.Object, parent_type: Optional[SollumType] = None) -> bpy.types.Object | None:
+    """Find parent Fragment or Drawable if one exists. Returns None otherwise."""
+    parent_types = [SollumType.FRAGMENT, SollumType.DRAWABLE, SollumType.DRAWABLE_DICTIONARY,
+                    SollumType.CLIP_DICTIONARY, SollumType.YMAP, *BOUND_TYPES]
+
+    if parent_type is not None and obj.parent is not None and obj.parent.sollum_type == parent_type:
+        return obj.parent
+
+    if obj.parent is None and obj.sollum_type in parent_types:
+        return obj
+
+    if obj.parent is None:
+        return None
+
+    return find_sollumz_parent(obj.parent, parent_type)
+
+
+def get_sollumz_materials(obj: bpy.types.Object):
+    """Get all Sollumz materials used by ``drawable_obj``."""
+    materials: list[bpy.types.Material] = []
+    used_materials: dict[bpy.types.Material, bool] = {}
+
+    for child in get_children_recursive(obj):
+        if child.sollum_type != SollumType.DRAWABLE_MODEL:
+            continue
+
+        for lod in child.sollumz_lods.lods:
+            if lod.mesh is None:
+                continue
+
+            mats = lod.mesh.materials
+
+            for mat in mats:
+                if mat.sollum_type != MaterialType.SHADER:
+                    continue
+
+                if mat not in used_materials:
+                    materials.append(mat)
+                    used_materials[mat] = True
+
+    return sorted(materials, key=lambda m: m.shader_properties.index)
+
+
+def get_export_transforms_to_apply(obj: bpy.types.Object):
+    """Get final transforms for a mesh object that should be directly applied to vertices upon export."""
+    parent_inverse = get_parent_inverse(obj)
+    bone_inverse = get_bone_pose_matrix(obj).inverted()
+
+    # Apply all transforms except any transforms from the current pose, and any parent transforms (depends on "Apply Parent Transforms" option)
+    return parent_inverse @ bone_inverse @ obj.matrix_world
+
+
+def get_parent_inverse(obj: bpy.types.Object) -> Matrix:
+    """Get the parent transforms to unapply based on the "Apply Parent Transforms" option"""
+    parent_obj = find_sollumz_parent(obj)
+
+    if obj.matrix_world.is_identity or parent_obj is None:
+        return Matrix()
+
+    if get_export_settings().apply_transforms:
+        if parent_obj.sollum_type == SollumType.BOUND_COMPOSITE:
+            return Matrix()
+        # Even when apply transforms is enabled, we still don't want to apply location, as Drawables/Fragments should always start from 0,0,0
+        return Matrix.Translation(parent_obj.matrix_world.translation).inverted()
+
+    return parent_obj.matrix_world.inverted()

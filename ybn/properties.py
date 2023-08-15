@@ -174,7 +174,7 @@ def register():
     bpy.types.Object.bound_properties = bpy.props.PointerProperty(
         type=BoundProperties)
     bpy.types.Object.margin = bpy.props.FloatProperty(
-        name="Margin", precision=3, update=update_bounds, min=0)
+        name="Margin", precision=3, update=update_bounds, min=0, default=0.04)
     bpy.types.Object.bound_radius = bpy.props.FloatProperty(
         name="Radius", precision=3, update=update_bounds, min=0)
     bpy.types.Object.bound_length = bpy.props.FloatProperty(
@@ -187,9 +187,6 @@ def register():
         type=BoundFlags)
     bpy.types.Object.composite_flags2 = bpy.props.PointerProperty(
         type=BoundFlags)
-
-    # TO KEEP TRACK OF THE INDEX IT WAS AT IN THE FILE, SLOPPY BUT EASIER THAN COMPARING VALUES WHEN IMPORTING FRAGMENTS
-    bpy.types.Object.creation_index = bpy.props.IntProperty(default=0)
 
     bpy.types.Scene.collision_material_index = bpy.props.IntProperty(
         name="Material Index")
@@ -213,68 +210,70 @@ def register():
     bpy.types.Scene.create_poly_bound_type = bpy.props.EnumProperty(
         items=[
             (SollumType.BOUND_POLY_BOX.value,
-             SOLLUMZ_UI_NAMES[SollumType.BOUND_POLY_BOX], "Create a bound poly box object."),
+             SOLLUMZ_UI_NAMES[SollumType.BOUND_POLY_BOX], "Create a bound poly box object"),
             (SollumType.BOUND_POLY_SPHERE.value,
-             SOLLUMZ_UI_NAMES[SollumType.BOUND_POLY_SPHERE], "Create a bound poly sphere object."),
+             SOLLUMZ_UI_NAMES[SollumType.BOUND_POLY_SPHERE], "Create a bound poly sphere object"),
             (SollumType.BOUND_POLY_CAPSULE.value,
-             SOLLUMZ_UI_NAMES[SollumType.BOUND_POLY_CAPSULE], "Create a bound poly capsule object."),
+             SOLLUMZ_UI_NAMES[SollumType.BOUND_POLY_CAPSULE], "Create a bound poly capsule object"),
             (SollumType.BOUND_POLY_CYLINDER.value,
-             SOLLUMZ_UI_NAMES[SollumType.BOUND_POLY_CYLINDER], "Create a bound poly cylinder object."),
-            (SollumType.BOUND_POLY_TRIANGLE.value,
-             SOLLUMZ_UI_NAMES[SollumType.BOUND_POLY_TRIANGLE], "Create a bound poly triangle object. (if you have a object selected then it will be converted to a bound poly triangle object")
+             SOLLUMZ_UI_NAMES[SollumType.BOUND_POLY_CYLINDER], "Create a bound poly cylinder object"),
         ],
         name="Type",
-        default=SollumType.BOUND_POLY_TRIANGLE.value
+        default=SollumType.BOUND_POLY_BOX.value
     )
 
     bpy.types.Scene.create_bound_type = bpy.props.EnumProperty(
         items=[
-            (SollumType.BOUND_SPHERE.value,
-             SOLLUMZ_UI_NAMES[SollumType.BOUND_SPHERE], "Create a bound sphere object."),
-            (SollumType.BOUND_CYLINDER.value,
-             SOLLUMZ_UI_NAMES[SollumType.BOUND_CYLINDER], "Create a bound cylinder object."),
-            (SollumType.BOUND_CAPSULE.value,
-             SOLLUMZ_UI_NAMES[SollumType.BOUND_CAPSULE], "Create a bound capsule object."),
-            (SollumType.BOUND_BOX.value,
-             SOLLUMZ_UI_NAMES[SollumType.BOUND_BOX], "Create a bound box object."),
-            (SollumType.BOUND_DISC.value,
-             SOLLUMZ_UI_NAMES[SollumType.BOUND_DISC], "Create a bound disc object."),
-            (SollumType.BOUND_CLOTH.value,
-             SOLLUMZ_UI_NAMES[SollumType.BOUND_CLOTH], "Create a bound cloth object."),
-            (SollumType.BOUND_GEOMETRY.value,
-             SOLLUMZ_UI_NAMES[SollumType.BOUND_GEOMETRY], "Create a bound geometry object."),
-            (SollumType.BOUND_GEOMETRYBVH.value,
-             SOLLUMZ_UI_NAMES[SollumType.BOUND_GEOMETRYBVH], "Create a bound geometrybvh object."),
             (SollumType.BOUND_COMPOSITE.value,
-             SOLLUMZ_UI_NAMES[SollumType.BOUND_COMPOSITE], "Create a bound composite object. (if objects are selected a drawable will be created with them as the children)"),
+             SOLLUMZ_UI_NAMES[SollumType.BOUND_COMPOSITE], "Create a bound composite object"),
+            (SollumType.BOUND_GEOMETRYBVH.value,
+             SOLLUMZ_UI_NAMES[SollumType.BOUND_GEOMETRYBVH], "Create a bound geometrybvh object"),
+            (SollumType.BOUND_BOX.value,
+             SOLLUMZ_UI_NAMES[SollumType.BOUND_BOX], "Create a bound box object"),
+            (SollumType.BOUND_SPHERE.value,
+             SOLLUMZ_UI_NAMES[SollumType.BOUND_SPHERE], "Create a bound sphere object"),
+            (SollumType.BOUND_CAPSULE.value,
+             SOLLUMZ_UI_NAMES[SollumType.BOUND_CAPSULE], "Create a bound capsule object"),
+            (SollumType.BOUND_CYLINDER.value,
+             SOLLUMZ_UI_NAMES[SollumType.BOUND_CYLINDER], "Create a bound cylinder object"),
+            (SollumType.BOUND_DISC.value,
+             SOLLUMZ_UI_NAMES[SollumType.BOUND_DISC], "Create a bound disc object"),
         ],
         name="Type",
         default=SollumType.BOUND_COMPOSITE.value
     )
 
     bpy.types.Scene.poly_bound_type_verts = bpy.props.EnumProperty(
-        items=[(SollumType.BOUND_POLY_BOX.value, SOLLUMZ_UI_NAMES[SollumType.BOUND_POLY_BOX], SOLLUMZ_UI_NAMES[SollumType.BOUND_POLY_BOX]),
-               (SollumType.BOUND_POLY_TRIANGLE.value, SOLLUMZ_UI_NAMES[SollumType.BOUND_POLY_TRIANGLE], SOLLUMZ_UI_NAMES[SollumType.BOUND_POLY_TRIANGLE])],
+        items=[
+            (SollumType.BOUND_POLY_BOX.value,
+             SOLLUMZ_UI_NAMES[SollumType.BOUND_POLY_BOX], "Create a bound polygon box object"),
+            (SollumType.BOUND_BOX.value, SOLLUMZ_UI_NAMES[SollumType.BOUND_BOX], "Create a bound box object")],
         name="Type",
-        default=SollumType.BOUND_POLY_TRIANGLE.value
+        default=SollumType.BOUND_POLY_BOX.value
     )
 
     bpy.types.Scene.poly_edge = bpy.props.EnumProperty(name="Edge", items=[("long", "Long Edge", "Create along the long edge"),
                                                                            ("short", "Short Edge", "Create along the short edge")])
-    bpy.types.Scene.poly_parent = bpy.props.PointerProperty(
-        type=bpy.types.Object, name="Parent", description=f"Bounds will be parented to this object. Parent must be a {SOLLUMZ_UI_NAMES[SollumType.BOUND_GEOMETRYBVH]} or {SOLLUMZ_UI_NAMES[SollumType.BOUND_GEOMETRY]}.")
-
-    bpy.types.Scene.composite_create_bvh = bpy.props.BoolProperty(
-        name="BVH", description="If true, the operator will create GeometryBVH objects, otherwise it will create Geometry objects.", default=True)
-
-    bpy.types.Scene.composite_replace_original = bpy.props.BoolProperty(
-        name="Replace Original", description=f"If true, the operator will replace the selected objects with the {SOLLUMZ_UI_NAMES[SollumType.BOUND_COMPOSITE]}.", default=True)
+    bpy.types.Scene.bound_child_type = bpy.props.EnumProperty(
+        items=[
+            (SollumType.BOUND_GEOMETRY.value,
+             SOLLUMZ_UI_NAMES[SollumType.BOUND_GEOMETRY], "Create bound geometry children."),
+            (SollumType.BOUND_GEOMETRYBVH.value,
+             SOLLUMZ_UI_NAMES[SollumType.BOUND_GEOMETRYBVH], "Create bound geometrybvh children.")
+        ],
+        name="Child Type",
+        description="The bound type of the Composite Children",
+        default=SollumType.BOUND_GEOMETRYBVH.value)
+    bpy.types.Scene.create_seperate_composites = bpy.props.BoolProperty(
+        name="Separate Objects", description="Create a separate Composite for each selected object")
 
     bpy.types.Scene.split_collision_count = bpy.props.IntProperty(
         name="Divide By", description=f"Amount to split {SOLLUMZ_UI_NAMES[SollumType.BOUND_GEOMETRYBVH]}s or {SOLLUMZ_UI_NAMES[SollumType.BOUND_COMPOSITE]}s by", default=2, min=2)
 
     bpy.types.Scene.composite_apply_default_flag_preset = bpy.props.BoolProperty(
-        name="Apply Default Flag", description=f"If true, the operator will apply the default flag preset to {SOLLUMZ_UI_NAMES[SollumType.BOUND_GEOMETRYBVH]} or {SOLLUMZ_UI_NAMES[SollumType.BOUND_GEOMETRY]}.", default=True)
+        name="Apply Default Flag", description=f"Apply the default flag preset to the bound children", default=True)
+    bpy.types.Scene.center_composite_to_selection = bpy.props.BoolProperty(
+        name="Center to Selection", description="Center the Bound Composite to all selected objects", default=True)
 
 
 def unregister():
@@ -285,7 +284,6 @@ def unregister():
     del bpy.types.Object.bound_dimensions
     del bpy.types.Object.composite_flags1
     del bpy.types.Object.composite_flags2
-    del bpy.types.Object.creation_index
     del bpy.types.Scene.collision_material_index
     del bpy.types.Scene.collision_materials
     del bpy.types.Material.collision_properties
@@ -294,11 +292,11 @@ def unregister():
     del bpy.types.Scene.flag_presets
     del bpy.types.Scene.flag_preset_index
     del bpy.types.Scene.create_poly_bound_type
+    del bpy.types.Scene.create_seperate_composites
     del bpy.types.Scene.create_bound_type
-    del bpy.types.Scene.poly_parent
-    del bpy.types.Scene.composite_create_bvh
-    del bpy.types.Scene.composite_replace_original
+    del bpy.types.Scene.bound_child_type
     del bpy.types.Scene.split_collision_count
     del bpy.types.Scene.composite_apply_default_flag_preset
+    del bpy.types.Scene.center_composite_to_selection
 
     bpy.app.handlers.load_post.remove(on_file_loaded)

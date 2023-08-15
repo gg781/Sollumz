@@ -1,11 +1,14 @@
 import traceback
 import os
-import pathlib
+from typing import Optional
 import bpy
+import time
+from collections import defaultdict
 import re
 from bpy_extras.io_utils import ImportHelper
-from .sollumz_helper import SOLLUMZ_OT_base
-from .sollumz_properties import SollumType, SOLLUMZ_UI_NAMES, BOUND_TYPES, SollumzExportSettings, SollumzImportSettings, TimeFlags, ArchetypeType
+from .sollumz_helper import SOLLUMZ_OT_base, find_sollumz_parent
+from .sollumz_properties import SollumType, SOLLUMZ_UI_NAMES, BOUND_TYPES, TimeFlags, ArchetypeType, LODLevel
+from .sollumz_preferences import get_export_settings
 from .cwxml.drawable import YDR, YDD
 from .cwxml.fragment import YFT
 from .cwxml.bound import YBN
@@ -26,105 +29,103 @@ from .ycd.ycdimport import import_ycd
 from .ycd.ycdexport import export_ycd
 from .ymap.ymapimport import import_ymap
 from .ymap.ymapexport import export_ymap
-from .tools.blenderhelper import get_terrain_texture_brush, remove_number_suffix
+from .tools.blenderhelper import add_child_of_bone_constraint, get_child_of_pose_bone, get_terrain_texture_brush, remove_number_suffix, create_blender_object, join_objects
 from .tools.ytyphelper import ytyp_from_objects
+from .ybn.properties import BoundProperties
+from .ybn.properties import BoundFlags
+
+from . import logger
 
 
-class SOLLUMZ_OT_import(SOLLUMZ_OT_base, bpy.types.Operator, ImportHelper):
+class TimedOperator:
+    @property
+    def time_elapsed(self) -> float:
+        """Get time elapsed since execution"""
+        return round(time.time() - self._start, 3)
+
+    def __init__(self) -> None:
+        self._start: float = 0.0
+
+    def execute(self, context: bpy.types.Context):
+        self._start = time.time()
+        return self.execute_timed(context)
+
+    def execute_timed(self, context: bpy.types.Context):
+        ...
+
+
+class SOLLUMZ_OT_import(bpy.types.Operator, ImportHelper, TimedOperator):
     """Imports xml files exported by codewalker"""
     bl_idname = "sollumz.import"
     bl_label = "Import Codewalker XML"
-    bl_action = "import"
-    bl_showtime = True
-    bl_update_view = False
+    bl_options = {"UNDO"}
 
     files: bpy.props.CollectionProperty(
         name="File Path",
         type=bpy.types.OperatorFileListElement,
+        options={"HIDDEN", "SKIP_SAVE"}
     )
 
     filter_glob: bpy.props.StringProperty(
         default=f"*{YDR.file_extension};*{YDD.file_extension};*{YFT.file_extension};*{YBN.file_extension};*{YNV.file_extension};*{YCD.file_extension};*{YMAP.file_extension};",
-        options={"HIDDEN"},
+        options={"HIDDEN", "SKIP_SAVE"},
         maxlen=255,
     )
-
-    import_settings: bpy.props.PointerProperty(type=SollumzImportSettings)
-
-    filename_exts = [YDR.file_extension, YDD.file_extension,
-                     YFT.file_extension, YBN.file_extension,
-                     YNV.file_extension, YCD.file_extension,
-                     YMAP.file_extension]
 
     def draw(self, context):
         pass
 
-    def import_file(self, filepath, ext):
-        try:
-            valid_type = False
-            if ext == YDR.file_extension:
-                import_ydr(filepath, self.import_settings)
-                valid_type = True
-            elif ext == YDD.file_extension:
-                import_ydd(self, filepath, self.import_settings)
-                valid_type = True
-            elif ext == YFT.file_extension:
-                import_yft(filepath, self)
-                valid_type = True
-            elif ext == YBN.file_extension:
-                import_ybn(filepath)
-                valid_type = True
-            elif ext == YNV.file_extension:
-                import_ynv(filepath)
-            elif ext == YCD.file_extension:
-                import_ycd(self, filepath, self.import_settings)
-            elif ext == YMAP.file_extension:
-                import_ymap(self, filepath, self.import_settings)
-                valid_type = True
-            if valid_type:
-                self.message(f"Succesfully imported: {filepath}")
-        except:
-            self.error(
-                f"Error importing: {filepath} \n {traceback.format_exc()}")
-            return False
+    def execute_timed(self, context):
+        logger.set_logging_operator(self)
 
-        return True
+        if not self.filepath or self.files[0].name == "":
+            self.report({"INFO"}, "No file selected for import!")
+            return {"CANCELLED"}
 
-    def run(self, context):
-        result = False
-        if self.import_settings.batch_mode == "DIRECTORY":
-            folderpath = os.path.dirname(self.filepath)
-            for file in os.listdir(folderpath):
-                ext = "".join(pathlib.Path(file).suffixes)
-                if ext in self.filename_exts:
-                    filepath = os.path.join(folderpath, file)
-                    result = self.import_file(filepath, ext)
-        else:
-            for file_elem in self.files:
-                directory = os.path.dirname(self.filepath)
-                filepath = os.path.join(directory, file_elem.name)
-                if os.path.isfile(filepath):
-                    ext = "".join(pathlib.Path(filepath).suffixes)
-                    result = self.import_file(filepath, ext)
+        for file in self.files:
+            directory = os.path.dirname(self.filepath)
+            filepath = os.path.join(directory, file.name)
 
-        if not result:
-            self.bl_showtime = False
+            try:
 
-        return True
+                if YDR.file_extension in filepath:
+                    import_ydr(filepath)
+                elif YDD.file_extension in filepath:
+                    import_ydd(filepath)
+                elif YFT.file_extension in filepath:
+                    import_yft(filepath)
+                elif YBN.file_extension in filepath:
+                    import_ybn(filepath)
+                elif YNV.file_extension in filepath:
+                    import_ynv(filepath)
+                elif YCD.file_extension in filepath:
+                    import_ycd(filepath)
+                elif YMAP.file_extension in filepath:
+                    import_ymap(filepath)
+                else:
+                    continue
+
+                self.report({"INFO"}, f"Successfully imported '{filepath}'")
+            except:
+                self.report({"ERROR"},
+                            f"Error importing: {filepath} \n {traceback.format_exc()}")
+
+                return {"CANCELLED"}
+
+        self.report(
+            {"INFO"}, f"Imported in {self.time_elapsed} seconds")
+
+        return {"FINISHED"}
 
 
-class SOLLUMZ_OT_export(SOLLUMZ_OT_base, bpy.types.Operator):
+class SOLLUMZ_OT_export(bpy.types.Operator, TimedOperator):
     """Exports codewalker xml files"""
     bl_idname = "sollumz.export"
     bl_label = "Export Codewalker XML"
-    bl_action = "export"
-    bl_showtime = True
-
-    export_settings: bpy.props.PointerProperty(type=SollumzExportSettings)
 
     filter_glob: bpy.props.StringProperty(
         default=f"*{YDR.file_extension};*{YDD.file_extension};*{YFT.file_extension};*{YBN.file_extension};*{YCD.file_extension};*{YMAP.file_extension};",
-        options={"HIDDEN"},
+        options={"HIDDEN", "SKIP_SAVE"},
         maxlen=255,
     )
 
@@ -132,187 +133,105 @@ class SOLLUMZ_OT_export(SOLLUMZ_OT_base, bpy.types.Operator):
         name="Output directory",
         description="Select export output directory",
         subtype="DIR_PATH",
+        options={"HIDDEN", "SKIP_SAVE"}
     )
+
+    def draw(self, context):
+        pass
 
     def invoke(self, context, event):
         context.window_manager.fileselect_add(self)
         return {"RUNNING_MODAL"}
 
-    def draw(self, context):
-        pass
+    def execute_timed(self, context: bpy.types.Context):
+        logger.set_logging_operator(self)
+        objs = self.collect_objects(context)
+        export_settings = get_export_settings()
 
-    def get_data_name(self, obj_name):
-        mode = self.export_settings.batch_mode
-        if mode == "COLLECTION":
-            for col in bpy.data.collections:
-                for obj in col.objects:
-                    if obj.name == obj_name:
-                        return col.name
-        elif mode in {"SCENE_COLLECTION", "ACTIVE_SCENE_COLLECTION"}:
-            scenes = [
-                bpy.context.scene] if mode == "ACTIVE_SCENE_COLLECTION" else bpy.data.scenes
-            for scene in scenes:
-                if not scene.objects:
-                    self.error(f"No objects in scene {scene.name} to export.")
-                for obj in scene.collection.objects:
-                    if obj.name == obj_name:
-                        return f"{scene.name}_{scene.collection.name}"
-        else:
-            for scene in bpy.data.scenes:
-                if not scene.objects:
-                    self.error(f"No objects in scene {scene.name} to export.")
-                for obj in scene.objects:
-                    if obj.name == obj_name:
-                        return scene.name
-        return ""
+        if not objs:
+            if export_settings.limit_to_selected:
+                self.report(
+                    {"INFO"}, "No Sollumz objects selected for export!")
+            else:
+                self.report(
+                    {"INFO"}, "No Sollumz objects in the scene to export!")
 
-    def make_directory(self, name):
-        dir = os.path.join(self.directory, self.get_data_name(
-            name) if self.export_settings.batch_mode != "OFF" else name)
-        if not os.path.exists(dir):
-            os.mkdir(dir)
-        return dir
+            return {"CANCELLED"}
 
-    def get_filepath(self, name, ext):
-        return os.path.join(self.make_directory(name), name + ext) if self.export_settings.use_batch_own_dir else os.path.join(self.directory, name + ext)
-
-    def get_only_parent_objs(self, objs):
-        pobjs = []
         for obj in objs:
-            if obj.parent is None or obj.parent.type == 'EMPTY':
-                pobjs.append(obj)
-        return pobjs
-
-    def collect_objects(self, context):
-        mode = self.export_settings.batch_mode
-        objects = []
-        if mode == "OFF":
-            if self.export_settings.use_active_collection:
-                if self.export_settings.use_selection:
-                    objects = [
-                        obj for obj in context.view_layer.active_layer_collection.collection.all_objects if obj.select_get()]
-                else:
-                    objects = context.view_layer.active_layer_collection.collection.all_objects
-            else:
-                if self.export_settings.use_selection:
-                    objects = context.selected_objects
-                else:
-                    objects = context.view_layer.objects
-        else:
-            if mode == "COLLECTION":
-                data_block = tuple(
-                    (coll, coll.name, "objects") for coll in bpy.data.collections if coll.objects)
-            elif mode in {"SCENE_COLLECTION", "ACTIVE_SCENE_COLLECTION"}:
-                scenes = [
-                    context.scene] if mode == "ACTIVE_SCENE_COLLECTION" else bpy.data.scenes
-                data_block = []
-                for scene in scenes:
-                    if not scene.objects:
-                        continue
-                    todo_collections = [(scene.collection, "_".join(
-                        (scene.name, scene.collection.name)))]
-                    while todo_collections:
-                        coll, coll_name = todo_collections.pop()
-                        todo_collections.extend(
-                            ((c, c.name) for c in coll.children if c.all_objects))
-                        data_block.append((coll, coll_name, "all_objects"))
-            else:
-                data_block = tuple((scene, scene.name, "objects")
-                                   for scene in bpy.data.scenes if scene.objects)
-
-            # this is how you can create the folder names if the user clicks "use_batch_own_dir"
-            for data, _, data_obj_paramname in data_block:
-                objects = getattr(
-                    data, data_obj_paramname).values()
-
-        result = []
-
-        types = self.export_settings.sollum_types
-        for obj in objects:
-            if obj.sollum_type in BOUND_TYPES:
-                # this is to make sure we get all bound objects without having to specify its specific type
-                if any(bound_type.value in types for bound_type in BOUND_TYPES):
-                    result.append(obj)
-            else:
-                if obj.sollum_type in types:
-                    result.append(obj)
-
-        return result
-
-    def export_object(self, obj):
-        try:
-            valid_type = False
             filepath = None
-            if obj.sollum_type == SollumType.DRAWABLE:
-                filepath = self.get_filepath(
-                    remove_number_suffix(obj.name.lower()), YDR.file_extension)
-                export_ydr(self, obj, filepath)
-                valid_type = True
-            elif obj.sollum_type == SollumType.DRAWABLE_DICTIONARY:
-                filepath = self.get_filepath(
-                    remove_number_suffix(obj.name.lower()), YDD.file_extension)
-                export_ydd(self, obj, filepath, self.export_settings)
-                valid_type = True
-            elif obj.sollum_type == SollumType.FRAGMENT:
-                filepath = self.get_filepath(
-                    remove_number_suffix(obj.name.lower()), YFT.file_extension)
-                export_yft(self, obj, filepath, self.export_settings)
-                valid_type = True
-            elif obj.sollum_type == SollumType.CLIP_DICTIONARY:
-                filepath = self.get_filepath(
-                    remove_number_suffix(obj.name.lower()), YCD.file_extension)
-                export_ycd(self, obj, filepath, self.export_settings)
-                valid_type = True
-            elif obj.sollum_type in BOUND_TYPES:
-                filepath = self.get_filepath(
-                    remove_number_suffix(obj.name.lower()), YBN.file_extension)
-                export_ybn(obj, filepath)
-                valid_type = True
-            elif obj.sollum_type == SollumType.YMAP:
-                filepath = self.get_filepath(
-                    remove_number_suffix(obj.name.lower()), YMAP.file_extension)
-                export_ymap(self, obj, filepath, self.export_settings)
-                valid_type = True
-            if valid_type:
-                self.message(f"Succesfully exported: {filepath}")
-        except:
-            self.error(
-                f"Error exporting: {filepath} \n {traceback.format_exc()}")
-            return False
-        return True
+            try:
+                if obj.sollum_type == SollumType.DRAWABLE:
+                    filepath = self.get_filepath(obj, YDR.file_extension)
+                    export_ydr(obj, filepath)
+                elif obj.sollum_type == SollumType.DRAWABLE_DICTIONARY:
+                    filepath = self.get_filepath(obj, YDD.file_extension)
+                    export_ydd(obj, filepath)
+                elif obj.sollum_type == SollumType.FRAGMENT:
+                    filepath = self.get_filepath(obj, YFT.file_extension)
+                    export_yft(obj, filepath)
+                elif obj.sollum_type == SollumType.CLIP_DICTIONARY:
+                    filepath = self.get_filepath(obj, YCD.file_extension)
+                    export_ycd(obj, filepath)
+                elif obj.sollum_type in BOUND_TYPES:
+                    filepath = self.get_filepath(obj, YBN.file_extension)
+                    export_ybn(obj, filepath)
+                elif obj.sollum_type == SollumType.YMAP:
+                    filepath = self.get_filepath(obj, YMAP.file_extension)
+                    export_ymap(obj, filepath)
+                else:
+                    continue
 
-    def run(self, context):
-        objects = self.get_only_parent_objs(self.collect_objects(context))
+                self.report(
+                    {"INFO"}, f"Successfully exported '{filepath}'")
 
-        if len(objects) == 0:
-            self.warning(
-                f"No objects of type: {' or '.join([SOLLUMZ_UI_NAMES[t].lower() for t in self.export_settings.sollum_types])} to export.")
-            return False
+            except:
+                self.report({"ERROR"},
+                            f"Error exporting: {filepath or obj.name} \n {traceback.format_exc()}")
 
-        mode = "OBJECT"
-        if context.active_object:
-            mode = context.active_object.mode
-            if mode != "OBJECT":
-                bpy.ops.object.mode_set(mode="OBJECT")
+                return {"CANCELLED"}
 
-        if len(objects) > 0:
-            for obj in objects:
-                result = self.export_object(obj)
-                # Dont show time on failure
-                if not result:
-                    self.bl_showtime = False
+            if export_settings.export_with_ytyp:
+                ytyp = ytyp_from_objects(objs)
+                filepath = os.path.join(
+                    self.directory, f"{ytyp.name}.ytyp.xml")
+                ytyp.write_xml(filepath)
+                self.report(
+                    {"INFO"}, f"Successfully exported '{filepath}' (auto-generated)")
 
-            if self.export_settings.export_with_ytyp:
-                ytyp = ytyp_from_objects(objects)
-                fp = self.get_filepath(
-                    ytyp.name, YTYP.file_extension)
-                ytyp.write_xml(fp)
+        self.report(
+            {"INFO"}, f"Exported in {self.time_elapsed} seconds")
 
-        if context.active_object:
-            if context.active_object.mode != mode:
-                bpy.ops.object.mode_set(mode=mode)
+        return {"FINISHED"}
 
-        return True
+    def collect_objects(self, context: bpy.types.Context) -> list[bpy.types.Object]:
+        export_settings = get_export_settings()
+
+        objs = context.scene.objects
+
+        if export_settings.limit_to_selected:
+            objs = context.selected_objects
+
+        return self.get_only_parent_objs(objs)
+
+    def get_only_parent_objs(self, objs: list[bpy.types.Object]):
+        parent_objs = set()
+        objs = set(objs)
+
+        for obj in objs:
+            parent_obj = find_sollumz_parent(obj)
+
+            if parent_obj is None or parent_obj in parent_objs:
+                continue
+
+            parent_objs.add(parent_obj)
+
+        return list(parent_objs)
+
+    def get_filepath(self, obj: bpy.types.Object, extension: str):
+        name = remove_number_suffix(obj.name.lower())
+
+        return os.path.join(self.directory, name + extension)
 
 
 class SOLLUMZ_OT_paint_vertices(SOLLUMZ_OT_base, bpy.types.Operator):
@@ -345,13 +264,13 @@ class SOLLUMZ_OT_paint_vertices(SOLLUMZ_OT_base, bpy.types.Operator):
 
         if len(objs) > 0:
             for obj in objs:
-                if obj.sollum_type == SollumType.DRAWABLE_GEOMETRY:
+                if obj.sollum_type == SollumType.DRAWABLE_MODEL:
                     self.paint_mesh(obj.data, self.color)
                     self.messages.append(
                         f"{obj.name} was successfully painted.")
                 else:
                     self.messages.append(
-                        f"{obj.name} will be skipped because it is not a {SOLLUMZ_UI_NAMES[SollumType.DRAWABLE_GEOMETRY]} type.")
+                        f"{obj.name} will be skipped because it is not a {SOLLUMZ_UI_NAMES[SollumType.DRAWABLE_MODEL]} type.")
         else:
             self.message("No objects selected to paint.")
             return False
@@ -465,90 +384,82 @@ def sollumz_menu_func_export(self, context):
                          text=f"Codewalker XML({YDR.file_extension}, {YDD.file_extension}, {YFT.file_extension}, {YBN.file_extension}, {YCD.file_extension})")
 
 
-class SOLLUMZ_OT_debug_hierarchy(SOLLUMZ_OT_base, bpy.types.Operator):
+class SOLLUMZ_OT_debug_hierarchy(bpy.types.Operator):
     """Debug: Fix incorrect Sollum Type after update. Must set correct type for top-level object first."""
     bl_idname = "sollumz.debug_hierarchy"
     bl_label = "Fix Hierarchy"
-    bl_action = bl_label
+    bl_options = {"UNDO"}
     bl_order = 100
 
-    def run(self, context):
+    def execute(self, context):
         sollum_type = context.scene.debug_sollum_type
         for obj in context.selected_objects:
             if len(obj.children) < 1:
-                self.message(f"{obj.name} has no children! Skipping...")
+                self.report(
+                    {"INFO"}, f"{obj.name} has no children! Skipping...")
                 continue
 
             obj.sollum_type = sollum_type
             if sollum_type == SollumType.DRAWABLE:
-                for model in obj.children:
-                    if model.type == "EMPTY":
-                        model.sollum_type = SollumType.DRAWABLE_MODEL
-                        for geom in model.children:
-                            if geom.type == "MESH":
-                                geom.sollum_type = SollumType.DRAWABLE_GEOMETRY
+                self.fix_drawable(obj)
             elif sollum_type == SollumType.DRAWABLE_DICTIONARY:
-                for draw in obj.children:
-                    if draw.type == "EMPTY":
-                        draw.sollum_type = SollumType.DRAWABLE
-                        for model in draw.children:
-                            if model.type == "EMPTY":
-                                model.sollum_type = SollumType.DRAWABLE_MODEL
-                                for geom in model.children:
-                                    if geom.type == "MESH":
-                                        geom.sollum_type = SollumType.DRAWABLE_GEOMETRY
+                self.fix_drawable_dict(obj)
             elif sollum_type == SollumType.BOUND_COMPOSITE:
-                for bound in obj.children:
-                    if bound.type == "EMPTY":
-                        if "CLOTH" in bound.name:
-                            bound.sollum_type = SollumType.BOUND_CLOTH
-                            continue
+                self.fix_composite(obj)
 
-                        if "BVH" in bound.name:
-                            bound.sollum_type = SollumType.BOUND_GEOMETRYBVH
+        self.report({"INFO"}, "Hierarchy successfuly set.")
+
+        return {"FINISHED"}
+
+    def fix_drawable(self, obj: bpy.types.Object):
+        for model in obj.children:
+            if model.type != "MESH":
+                continue
+
+            model.sollum_type = SollumType.DRAWABLE_MODEL
+
+    def fix_drawable_dict(self, obj: bpy.types.Object):
+        for draw in obj.children:
+            if draw.type != "EMPTY":
+                continue
+
+            draw.sollum_type = SollumType.DRAWABLE
+            self.fix_drawable(draw)
+
+    def fix_composite(self, obj: bpy.types.Object):
+        for bound in obj.children:
+            if bound.type == "EMPTY":
+                if "cloth" in bound.name.lower():
+                    bound.sollum_type = SollumType.BOUND_CLOTH
+                    continue
+
+                if "bvh" in bound.name.lower():
+                    bound.sollum_type = SollumType.BOUND_GEOMETRYBVH
+                else:
+                    bound.sollum_type = SollumType.BOUND_GEOMETRY
+                for geom in bound.children:
+                    if geom.type == "MESH":
+                        if "Box" in geom.name:
+                            geom.sollum_type = SollumType.BOUND_POLY_BOX
+                        elif "Sphere" in geom.name:
+                            geom.sollum_type = SollumType.BOUND_POLY_SPHERE
+                        elif "Capsule" in geom.name:
+                            geom.sollum_type = SollumType.BOUND_POLY_CAPSULE
+                        elif "Cylinder" in geom.name:
+                            geom.sollum_type = SollumType.BOUND_POLY_CYLINDER
                         else:
-                            bound.sollum_type = SollumType.BOUND_GEOMETRY
-                        for geom in bound.children:
-                            if geom.type == "MESH":
-                                if "Box" in geom.name:
-                                    geom.sollum_type = SollumType.BOUND_POLY_BOX
-                                elif "Sphere" in geom.name:
-                                    geom.sollum_type = SollumType.BOUND_POLY_SPHERE
-                                elif "Capsule" in geom.name:
-                                    geom.sollum_type = SollumType.BOUND_POLY_CAPSULE
-                                elif "Cylinder" in geom.name:
-                                    geom.sollum_type = SollumType.BOUND_POLY_CYLINDER
-                                else:
-                                    geom.sollum_type = SollumType.BOUND_POLY_TRIANGLE
-                    if bound.type == "MESH":
-                        if "Box" in bound.name:
-                            bound.sollum_type = SollumType.BOUND_POLY_BOX
-                        elif "Sphere" in bound.name:
-                            bound.sollum_type = SollumType.BOUND_POLY_SPHERE
-                        elif "Capsule" in bound.name:
-                            bound.sollum_type = SollumType.BOUND_POLY_CAPSULE
-                        elif "Cylinder" in bound.name:
-                            bound.sollum_type = SollumType.BOUND_POLY_CYLINDER
-                        else:
-                            bound.sollum_type = SollumType.BOUND_POLY_TRIANGLE
-        self.message("Hierarchy successfuly set.")
-        return True
-
-
-class SOLLUMZ_OT_debug_set_sollum_type(SOLLUMZ_OT_base, bpy.types.Operator):
-    """Debug: Set Sollum Type"""
-    bl_idname = "sollumz.debug_set_sollum_type"
-    bl_label = "Set Sollum Type"
-    bl_action = bl_label
-    bl_order = 100
-
-    def run(self, context):
-        sel_sollum_type = context.scene.all_sollum_type
-        for obj in context.selected_objects:
-            obj.sollum_type = sel_sollum_type
-        self.message(
-            f"Sollum Type successfuly set to {SOLLUMZ_UI_NAMES[sel_sollum_type]}.")
-        return True
+                            geom.sollum_type = SollumType.BOUND_POLY_TRIANGLE
+            if bound.type == "MESH":
+                if "box" in bound.name.lower():
+                    bound.sollum_type = SollumType.BOUND_POLY_BOX
+                elif "sphere" in bound.name.lower():
+                    bound.sollum_type = SollumType.BOUND_POLY_SPHERE
+                elif "capsule" in bound.name.lower():
+                    bound.sollum_type = SollumType.BOUND_POLY_CAPSULE
+                elif "cylinder" in bound.name.lower():
+                    bound.sollum_type = SollumType.BOUND_POLY_CYLINDER
+                else:
+                    bound.sollum_type = SollumType.BOUND_POLY_TRIANGLE
 
 
 class SOLLUMZ_OT_debug_fix_light_intensity(bpy.types.Operator):
@@ -674,6 +585,202 @@ class SOLLUMZ_OT_debug_reload_entity_sets(bpy.types.Operator):
                             new_entity[k] = v
 
                         new_entity.attached_entity_set_id = str(entity_set.id)
+
+        return {"FINISHED"}
+
+
+class SOLLUMZ_OT_debug_migrate_drawable_models(bpy.types.Operator):
+    """Convert old drawable model to use new LOD system"""
+    bl_idname = "sollumz.migratedrawable"
+    bl_label = "Migrate Drawable Model(s)"
+    bl_options = {"UNDO"}
+
+    def execute(self, context):
+        selected_models = [
+            obj for obj in context.selected_objects if obj.sollum_type == SollumType.DRAWABLE_MODEL]
+
+        if not selected_models:
+            self.report({"INFO"}, "No drawable models selected!")
+            return {"CANCELLED"}
+
+        parent = selected_models[0].parent
+
+        models_by_lod: dict[LODLevel,
+                            list[bpy.types.Object]] = defaultdict(list)
+
+        for obj in selected_models:
+            models_by_lod[obj.drawable_model_properties.sollum_lod].extend(
+                obj.children)
+            bpy.data.objects.remove(obj)
+
+        model_obj = create_blender_object(SollumType.DRAWABLE_MODEL)
+        model_obj.sollumz_lods.add_empty_lods()
+        old_mesh = model_obj.data
+
+        for lod_level, geometries in models_by_lod.items():
+
+            if len(geometries) > 1:
+                joined_obj = join_objects(geometries)
+            else:
+                joined_obj = geometries[0]
+
+            model_obj.sollumz_lods.set_lod_mesh(lod_level, joined_obj.data)
+            model_obj.sollumz_lods.set_active_lod(lod_level)
+
+            context.view_layer.objects.active = joined_obj
+            model_obj.select_set(True)
+
+            bpy.ops.object.make_links_data(type='MODIFIERS')
+            bpy.data.objects.remove(joined_obj)
+
+        bpy.data.meshes.remove(old_mesh)
+
+        model_obj.parent = parent
+
+        # Set highest lod level
+        for lod_level in [LODLevel.HIGH, LODLevel.MEDIUM, LODLevel.LOW, LODLevel.VERYLOW]:
+            if model_obj.sollumz_lods.get_lod(lod_level) != None:
+                model_obj.sollumz_lods.set_active_lod(lod_level)
+                break
+
+        return {"FINISHED"}
+
+
+class SOLLUMZ_OT_debug_migrate_bound_geometries(bpy.types.Operator):
+    """Convert old bound geometries to new hiearchy using shape keys for damaged layers"""
+    bl_idname = "sollumz.migrateboundgeoms"
+    bl_label = "Migrate Bound Geometry(s)"
+    bl_options = {"UNDO"}
+
+    def execute(self, context):
+        selected = [
+            obj for obj in context.selected_objects if obj.sollum_type == SollumType.BOUND_GEOMETRY]
+
+        if not selected:
+            self.report({"INFO"}, "No bound geometries selected!")
+            return {"CANCELLED"}
+
+        for obj in selected:
+            bound_meshes = []
+            damaged_meshes = []
+
+            for child in obj.children:
+                if child.type != "MESH":
+                    continue
+
+                child.data.transform(child.matrix_basis)
+                child.matrix_basis.identity()
+
+                if child.sollum_type == SollumType.BOUND_POLY_TRIANGLE:
+                    bound_meshes.append(child)
+                elif child.sollum_type == SollumType.BOUND_POLY_TRIANGLE2:
+                    damaged_meshes.append(child)
+
+            joined_obj = join_objects(bound_meshes)
+            joined_obj.sollum_type = SollumType.BOUND_GEOMETRY
+            joined_obj.name = obj.name
+            joined_obj.parent = obj.parent
+
+            self.set_bound_geometry_properties(obj, joined_obj)
+            self.set_composite_flags(obj, joined_obj)
+
+            joined_obj.matrix_basis = obj.matrix_basis
+
+            if damaged_meshes:
+                joined_damaged_obj = join_objects(damaged_meshes)
+                self.set_shape_keys(joined_obj, joined_damaged_obj)
+
+                bpy.data.meshes.remove(joined_damaged_obj.data)
+
+            bpy.data.objects.remove(obj)
+
+        return {"FINISHED"}
+
+    def set_bound_geometry_properties(self, old_obj: bpy.types.Object, new_obj: bpy.types.Object):
+        for prop_name in BoundProperties.__annotations__.keys():
+            value = getattr(old_obj.bound_properties, prop_name)
+            setattr(new_obj.bound_properties, prop_name, value)
+
+    def set_composite_flags(self, old_obj: bpy.types.Object, new_obj: bpy.types.Object):
+        def set_flags(prop_name: str):
+            flags_props = getattr(old_obj, prop_name)
+            new_flags_props = getattr(new_obj, prop_name)
+
+            for flag_name in BoundFlags.__annotations__.keys():
+                value = getattr(flags_props, flag_name)
+                setattr(new_flags_props, flag_name, value)
+
+        set_flags("composite_flags1")
+        set_flags("composite_flags2")
+
+    def set_shape_keys(self, bound_obj: bpy.types.Object, damaged_obj: bpy.types.Object):
+        bound_obj.shape_key_add(name="Basis")
+        deformed_key = bound_obj.shape_key_add(name="Deformed")
+
+        for i, vert in enumerate(damaged_obj.data.vertices):
+            deformed_key.data[i].co = vert.co
+
+
+class SOLLUMZ_OT_debug_replace_armature_constraints(bpy.types.Operator):
+    """Replace the Armature constraints in all selected objects for Child Of constraints (for migrating pre version 0.3 projects)"""
+    bl_idname = "sollumz.replace_armature_constraints"
+    bl_label = "Replace Armature Constraints"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        if not context.selected_objects:
+            self.report({"INFO"}, "No objects selected!")
+            return {"CANCELLED"}
+
+        for obj in context.selected_objects:
+            constraint = self.get_armature_constraint(obj)
+
+            if constraint is None or not constraint.targets:
+                continue
+
+            target = constraint.targets[0]
+            armature_obj = target.target
+            target_bone = target.subtarget
+
+            obj.constraints.remove(constraint)
+
+            add_child_of_bone_constraint(obj, armature_obj, target_bone)
+            self.set_obj_child_of_bone_inverse(obj)
+
+        return {"FINISHED"}
+
+    @staticmethod
+    def get_armature_constraint(obj: bpy.types.Object) -> Optional[bpy.types.ArmatureConstraint]:
+        for constraint in obj.constraints:
+            if constraint.type == "ARMATURE":
+                return constraint
+
+    @staticmethod
+    def set_obj_child_of_bone_inverse(obj: bpy.types.Object):
+        """Invert the transformations of the Child Of constraint bone on obj
+        so that the object doesn't get double transformed"""
+        # bone = get_child_of_bone(obj)
+        bone = get_child_of_pose_bone(obj)
+
+        if bone is None:
+            return
+
+        obj.matrix_local = bone.matrix.inverted() @ obj.matrix_local
+
+
+class SOLLUMZ_OT_set_sollum_type(bpy.types.Operator):
+    """Set the sollum type of all selected objects"""
+    bl_idname = "sollumz.setsollumtype"
+    bl_label = "Set Sollum Type"
+
+    def execute(self, context):
+        sollum_type = context.scene.all_sollum_type
+
+        for obj in context.selected_objects:
+            obj.sollum_type = sollum_type
+
+        self.report(
+            {"INFO"}, f"Sollum Type successfuly set to {SOLLUMZ_UI_NAMES[sollum_type]}.")
 
         return {"FINISHED"}
 

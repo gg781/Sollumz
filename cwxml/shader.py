@@ -61,17 +61,15 @@ class Shader(ElementTree):
                 return True
         return False
 
-    def get_layout_from_semantic(self, vertex_semantic, is_skinned=False):
+    @property
+    def used_texcoords(self) -> set[str]:
+        names = set()
         for layout in self.layouts:
-            if layout.vertex_semantic == vertex_semantic:
-                return layout
+            for field_name in layout.value:
+                if "TexCoord" in field_name:
+                    names.add(field_name)
 
-        if is_skinned:
-            for layout in self.layouts:
-                if "BlendWeights" in layout.value:
-                    return layout
-
-        return self.layouts[0]
+        return names
 
 
 class ShaderManager:

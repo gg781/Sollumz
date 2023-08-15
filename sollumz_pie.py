@@ -35,11 +35,41 @@ class SOLLUMZ_MT_pie_menu(Menu):
         pie.operator("sollumz.export",
                      text="Export CodeWalker XML", icon='EXPORT')
         # Bottom-left
-        pie.operator("sollumz.createdrawable",
-                     text="Create Drawable", icon='CUBE')
+        pie.operator("sollumz.converttodrawable", icon='CUBE')
         # Bottom-right
-        pie.operator("sollumz.createbound",
-                     text="Create Composite", icon='CUBE')
+        pie.operator("sollumz.converttocomposite", icon='CUBE')
+
+
+class SOLLUMZ_MT_view_pie_menu(Menu):
+    bl_idname = "SOLLUMZ_MT_view_pie_menu"
+    bl_label = "Sollumz Object Visibility"
+
+    def draw(self, context):
+        layout = self.layout
+
+        pie = layout.menu_pie()
+        # Left
+        if context.scene.sollumz_show_collisions:
+            pie.operator("sollumz.hide_collisions")
+        else:
+            pie.operator("sollumz.show_collisions")
+        # Right
+        pie.operator("sollumz.set_lod_med")
+        # Bottom
+        pie.operator("sollumz.set_lod_vlow")
+        # Top
+        pie.operator("sollumz.set_lod_very_high")
+        # Top-left
+        if context.scene.sollumz_show_shattermaps:
+            pie.operator("sollumz.hide_shattermaps")
+        else:
+            pie.operator("sollumz.show_shattermaps")
+        # Top-right
+        pie.operator("sollumz.set_lod_high")
+        # Bottom-left
+        pie.operator("sollumz.hide_object", text="Hide")
+        # Bottom-right
+        pie.operator("sollumz.set_lod_low")
 
 
 addon_keymaps = []
@@ -58,6 +88,12 @@ def register():
 
         addon_keymaps.append((km, kmi))
 
+        kmi = km.keymap_items.new(
+            "wm.call_menu_pie", type='V', value='PRESS', shift=True)
+        kmi.properties.name = "SOLLUMZ_MT_view_pie_menu"
+
+        addon_keymaps.append((km, kmi))
+
 
 def unregister():
 
@@ -69,5 +105,3 @@ def unregister():
 
 if __name__ == "__main__":
     register()
-
-    bpy.ops.wm.call_menu_pie(name="SOLLUMZ_MT_pie_menu")
