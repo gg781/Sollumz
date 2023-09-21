@@ -158,15 +158,19 @@ class SOLLUMZ_PT_LIGHT_PANEL(bpy.types.Panel):
         row.prop(light, "sollum_type")
         if light.sollum_type == LightType.NONE:
             return
+        elif light.sollum_type == LightType.CAPSULE:
+            layout.separator()
+            box = layout.box()
+            box.label(text="Capsule Properties", icon="MESH_CAPSULE")
+            box.prop(light.light_properties, "cone_inner_angle")
+            box.prop(light.light_properties, "cone_outer_angle")
+            box.prop(light.light_properties, "extent")
         layout.separator()
         layout.prop(light.light_properties, "light_hash")
         layout.prop(light.light_properties, "group_id")
         layout.prop(light.light_properties, "projected_texture_hash")
         layout.separator()
         layout.prop(light.light_properties, "flashiness")
-        if light.sollum_type == LightType.CAPSULE:
-            layout.separator()
-            layout.prop(light.light_properties, "extent")
         layout.separator()
         layout.prop(light.light_properties, "volume_size_scale")
         layout.prop(light.light_properties, "volume_outer_color")
@@ -429,7 +433,9 @@ class SOLLUMZ_PT_BONE_PANEL(bpy.types.Panel):
 
         bone = context.active_bone
 
-        layout.prop(bone.bone_properties, "tag")
+        row = layout.row(align=True)
+        row.prop(bone.bone_properties, "tag")
+        row.prop(bone.bone_properties, "use_manual_tag", toggle=True, icon="MODIFIER_ON", icon_only=True)
         layout.separator()
 
         layout.label(text="Flags")

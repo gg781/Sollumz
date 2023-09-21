@@ -38,17 +38,18 @@ from ..cwxml.shader import ShaderManager
 from .. import logger
 
 
-def export_ydr(drawable_obj: bpy.types.Object, filepath: str):
+def export_ydr(drawable_obj: bpy.types.Object, filepath: str) -> bool:
     export_settings = get_export_settings()
 
     drawable_xml = create_drawable_xml(
-        drawable_obj, auto_calc_bone_tag=export_settings.auto_calculate_bone_tag, auto_calc_inertia=export_settings.auto_calculate_inertia, auto_calc_volume=export_settings.auto_calculate_volume, apply_transforms=export_settings.apply_transforms)
+        drawable_obj, auto_calc_inertia=export_settings.auto_calculate_inertia, auto_calc_volume=export_settings.auto_calculate_volume, apply_transforms=export_settings.apply_transforms)
     drawable_xml.write_xml(filepath)
 
     write_embedded_textures(drawable_obj, filepath)
+    return True
 
 
-def create_drawable_xml(drawable_obj: bpy.types.Object, armature_obj: Optional[bpy.types.Object] = None, auto_calc_bone_tag: bool = False, materials: Optional[list[bpy.types.Material]] = None, auto_calc_volume: bool = False, auto_calc_inertia: bool = False, apply_transforms: bool = False):
+def create_drawable_xml(drawable_obj: bpy.types.Object, armature_obj: Optional[bpy.types.Object] = None, materials: Optional[list[bpy.types.Material]] = None, auto_calc_volume: bool = False, auto_calc_inertia: bool = False, apply_transforms: bool = False):
     """Create a ``Drawable`` cwxml object. Optionally specify an external ``armature_obj`` if ``drawable_obj`` is not an armature."""
     drawable_xml = Drawable()
     drawable_xml.matrix = None
@@ -69,10 +70,8 @@ def create_drawable_xml(drawable_obj: bpy.types.Object, armature_obj: Optional[b
     if armature_obj or drawable_obj.type == "ARMATURE":
         armature_obj = armature_obj or drawable_obj
 
-        drawable_xml.skeleton = create_skeleton_xml(
-            armature_obj, auto_calc_bone_tag, apply_transforms)
-        drawable_xml.joints = create_joints_xml(
-            armature_obj, auto_calc_bone_tag)
+        drawable_xml.skeleton = create_skeleton_xml(armature_obj, apply_transforms)
+        drawable_xml.joints = create_joints_xml(armature_obj)
 
         bones = armature_obj.data.bones
 
@@ -312,10 +311,9 @@ def get_loop_inds_by_material(mesh: bpy.types.Mesh, drawable_mats: list[bpy.type
 def get_tangent_required(material: bpy.types.Material):
     shader_name = material.shader_properties.filename
 
-    if shader_name not in ShaderManager.shaders:
+    shader = ShaderManager.find_shader(shader_name)
+    if shader is None:
         return False
-
-    shader = ShaderManager.shaders[shader_name]
 
     return shader.required_tangent
 
@@ -324,10 +322,9 @@ def get_used_texcoords(material: bpy.types.Material):
     """Get TexCoords that the material's shader uses"""
     shader_name = material.shader_properties.filename
 
-    if shader_name not in ShaderManager.shaders:
+    shader = ShaderManager.find_shader(shader_name)
+    if shader is None:
         return {"TexCoord0"}
-
-    shader = ShaderManager.shaders[shader_name]
 
     return shader.used_texcoords
 
@@ -495,10 +492,7 @@ def split_geom_by_vert_count(geom_xml: Geometry):
         raise ValueError(
             "Failed to split Geometry by vertex count. Vertex buffer and index buffer cannot be None!")
 
-    MAX_VERTS = 65535
-
-    vert_buffers, ind_buffers = split_vert_buffers_by_count(
-        geom_xml.vertex_buffer.data, geom_xml.index_buffer.data, MAX_VERTS)
+    vert_buffers, ind_buffers = split_vert_buffers(geom_xml.vertex_buffer.data, geom_xml.index_buffer.data)
 
     geoms: list[Geometry] = []
 
@@ -517,24 +511,43 @@ def split_geom_by_vert_count(geom_xml: Geometry):
     return tuple(geoms)
 
 
-def split_vert_buffers_by_count(vert_buffer: NDArray, ind_buffer: NDArray[np.uint32], count: int) -> tuple[tuple[NDArray], tuple[NDArray[np.uint32]]]:
-    """Splits vertex and index buffers by vertex count. Returns tuple of split vertex buffers and tuple of index buffers"""
-    num_splits = math.ceil(len(vert_buffer) / count)
+def split_vert_buffers(
+    vert_buffer: NDArray,
+    ind_buffer: NDArray[np.uint32]
+) -> tuple[tuple[NDArray], tuple[NDArray[np.uint32]]]:
+    """Splits vertex and index buffers on chunks that fit in 16-bit indices.
+    Returns tuple of split vertex buffers and tuple of index buffers"""
+    MAX_INDEX = 65535
 
-    if num_splits <= 1:
-        return ((vert_buffer,), (ind_buffer,))
-
-    num_tris = math.ceil(len(ind_buffer) / 3)
-    face_inds = np.arange(num_tris, dtype=np.uint32)
+    total_index = 0
+    idx_count = len(ind_buffer)
 
     split_vert_arrs = []
     split_ind_arrs = []
+    while total_index < idx_count:
+        old_index_to_new_index = {}
+        chunk_vertices_indices = []
+        chunk_indices = []
+        chunk_index = 0
+        while total_index < idx_count and len(chunk_indices) < MAX_INDEX:
+            old_index = ind_buffer[total_index]
+            existing_index = old_index_to_new_index.get(old_index, None)
+            if existing_index is not None:
+                # we already have this index vertex addedm simply remap it to new index
+                chunk_indices.append(existing_index)
+            else:
+                # We got new index unseen before, we have to add both vertex and index
+                chunk_indices.append(chunk_index)
+                chunk_vertices_indices.append(old_index)
+                old_index_to_new_index[old_index] = chunk_index
+                chunk_index += 1
 
-    for faces_split in np.array_split(face_inds, num_splits):
-        split_vert_arr, split_ind_arr = get_faces_subset(
-            vert_buffer, ind_buffer, faces_split)
-        split_vert_arrs.append(split_vert_arr)
-        split_ind_arrs.append(split_ind_arr)
+            total_index += 1
+
+        chunk_vertices_arr = vert_buffer[chunk_vertices_indices]
+        chunk_indices_arr = np.array(chunk_indices, dtype=np.uint32)
+        split_vert_arrs.append(chunk_vertices_arr)
+        split_ind_arrs.append(chunk_indices_arr)
 
     return (tuple(split_vert_arrs), tuple(split_ind_arrs))
 
@@ -619,7 +632,7 @@ def set_texture_flags(node: bpy.types.ShaderNodeTexImage, texture: Texture):
     return texture
 
 
-def create_skeleton_xml(armature_obj: bpy.types.Object, auto_calc_bone_tag: bool = False, apply_transforms: bool = False):
+def create_skeleton_xml(armature_obj: bpy.types.Object, apply_transforms: bool = False):
     if armature_obj.type != "ARMATURE" or not armature_obj.pose.bones:
         return None
 
@@ -634,8 +647,7 @@ def create_skeleton_xml(armature_obj: bpy.types.Object, auto_calc_bone_tag: bool
 
     for bone_index, pose_bone in enumerate(bones):
 
-        bone_xml = create_bone_xml(
-            pose_bone, bone_index, armature_obj.data, matrix, auto_calc_bone_tag)
+        bone_xml = create_bone_xml(pose_bone, bone_index, armature_obj.data, matrix)
 
         skeleton_xml.bones.append(bone_xml)
 
@@ -644,18 +656,13 @@ def create_skeleton_xml(armature_obj: bpy.types.Object, auto_calc_bone_tag: bool
     return skeleton_xml
 
 
-def create_bone_xml(pose_bone: bpy.types.PoseBone, bone_index: int, armature: bpy.types.Armature, armature_matrix: Matrix, auto_calc_bone_tag: bool = False):
+def create_bone_xml(pose_bone: bpy.types.PoseBone, bone_index: int, armature: bpy.types.Armature, armature_matrix: Matrix):
     bone = pose_bone.bone
 
     bone_xml = Bone()
     bone_xml.name = bone.name
     bone_xml.index = bone_index
-
-    if auto_calc_bone_tag:
-        bone_xml.tag = calculate_bone_tag(
-            bone_xml.name) if bone_xml.index > 0 else 0
-    else:
-        bone_xml.tag = bone.bone_properties.tag
+    bone_xml.tag = bone.bone_properties.tag
 
     bone_xml.parent_index = get_bone_parent_index(bone, armature)
     bone_xml.sibling_index = get_bone_sibling_index(bone, armature)
@@ -664,23 +671,6 @@ def create_bone_xml(pose_bone: bpy.types.PoseBone, bone_index: int, armature: bp
     set_bone_xml_transforms(bone_xml, bone, armature_matrix)
 
     return bone_xml
-
-
-def calculate_bone_tag(bone_name: str):
-    hash = 0
-    x = 0
-
-    for char in str.upper(bone_name):
-        char = ord(char)
-        hash = (hash << 4) + char
-        x = hash & 0xF0000000
-
-        if x != 0:
-            hash ^= x >> 24
-
-        hash &= ~x
-
-    return hash % 0xFE8F + 0x170
 
 
 def get_bone_parent_index(bone: bpy.types.Bone, armature: bpy.types.Armature):
@@ -789,7 +779,7 @@ def get_bone_index(armature: bpy.types.Armature, bone: bpy.types.Bone) -> Option
     return index
 
 
-def create_joints_xml(armature_obj: bpy.types.Object, auto_calc_bone_tag: bool = False):
+def create_joints_xml(armature_obj: bpy.types.Object):
     if armature_obj.pose is None:
         return None
 
@@ -798,8 +788,7 @@ def create_joints_xml(armature_obj: bpy.types.Object, auto_calc_bone_tag: bool =
     for pose_bone in armature_obj.pose.bones:
         limit_rot_constraint = get_limit_rot_constraint(pose_bone)
         limit_pos_constraint = get_limit_pos_constraint(pose_bone)
-        bone_tag = calculate_bone_tag(
-            pose_bone.bone.name) if auto_calc_bone_tag else pose_bone.bone.bone_properties.tag
+        bone_tag = pose_bone.bone.bone_properties.tag
 
         if limit_rot_constraint is not None:
             joints.rotation_limits.append(
@@ -824,21 +813,21 @@ def get_limit_pos_constraint(pose_bone: bpy.types.PoseBone) -> bpy.types.LimitLo
             return constraint
 
 
-def create_rotation_limit_xml(constraint: bpy.types.LimitRotationConstraint, bone_tag: str):
+def create_rotation_limit_xml(constraint: bpy.types.LimitRotationConstraint, bone_tag: int):
     joint = RotationLimit()
     set_joint_properties(joint, constraint, bone_tag)
 
     return joint
 
 
-def create_translation_limit_xml(constraint: bpy.types.LimitRotationConstraint, bone_tag: str):
+def create_translation_limit_xml(constraint: bpy.types.LimitRotationConstraint, bone_tag: int):
     joint = BoneLimit()
     set_joint_properties(joint, constraint, bone_tag)
 
     return joint
 
 
-def set_joint_properties(joint: BoneLimit, constraint: bpy.types.LimitRotationConstraint | bpy.types.LimitLocationConstraint, bone_tag: str):
+def set_joint_properties(joint: BoneLimit, constraint: bpy.types.LimitRotationConstraint | bpy.types.LimitLocationConstraint, bone_tag: int):
     joint.bone_id = bone_tag
     joint.min = Vector(
         (constraint.min_x, constraint.min_y, constraint.min_z))
@@ -933,8 +922,8 @@ def get_shaders_from_blender(materials):
         shader.name = material.shader_properties.name
         shader.filename = material.shader_properties.filename
         shader.render_bucket = material.shader_properties.renderbucket
-        shader.parameters = list(
-            ShaderManager.shaders[shader.filename].parameters)
+        shader_preset = ShaderManager.find_shader(shader.filename)
+        shader.parameters = list(shader_preset.parameters) if shader_preset is not None else []
 
         for node in material.node_tree.nodes:
             param = None

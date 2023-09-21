@@ -3,6 +3,7 @@ import bpy
 from ..cwxml.shader import ShaderManager, Shader
 from ..sollumz_properties import MaterialType
 from ..tools.blenderhelper import find_bsdf_and_material_output
+from ..tools.animationhelper import add_global_anim_uv_nodes
 
 class ShaderBuilder(NamedTuple):
     shader: Shader
@@ -19,7 +20,7 @@ class ShaderMaterial(NamedTuple):
 
 shadermats = []
 
-for shader in ShaderManager.shaders.values():
+for shader in ShaderManager._shaders.values():
     name = shader.filename.replace(".sps", "").upper()
 
     shadermats.append(ShaderMaterial(
@@ -932,11 +933,12 @@ def create_terrain_shader(b: ShaderBuilder):
 
 
 def create_shader(filename: str):
-    if filename not in ShaderManager.shaders:
+    shader = ShaderManager.find_shader(filename)
+    if shader is None:
         raise AttributeError(f"Shader '{filename}' does not exist!")
 
-    shader = ShaderManager.shaders[filename]
-    base_name = ShaderManager.base_shaders[filename]
+    filename = shader.filename  # in case `filename` was hashed initially
+    base_name = ShaderManager.find_shader_base_name(filename)
 
     mat = bpy.data.materials.new(filename.replace(".sps", ""))
     mat.sollum_type = MaterialType.SHADER
@@ -960,6 +962,9 @@ def create_shader(filename: str):
         create_terrain_shader(builder)
     else:
         create_basic_shader_nodes(builder)
+
+    if shader.is_uv_animation_supported:
+        add_global_anim_uv_nodes(mat)
 
     organize_node_tree(builder)
 

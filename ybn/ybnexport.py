@@ -40,7 +40,7 @@ T_PolyCylCap = TypeVar("T_PolyCylCap", bound=PolyCylinder | PolyCapsule)
 MAX_VERTICES = 32767
 
 
-def export_ybn(obj: bpy.types.Object, filepath: str):
+def export_ybn(obj: bpy.types.Object, filepath: str) -> bool:
     export_settings = get_export_settings()
 
     bounds = BoundFile()
@@ -50,9 +50,15 @@ def export_ybn(obj: bpy.types.Object, filepath: str):
     bounds.composite = composite
 
     bounds.write_xml(filepath)
+    return True
 
 
-def create_composite_xml(obj: bpy.types.Object, auto_calc_inertia: bool = False, auto_calc_volume: bool = False):
+def create_composite_xml(
+    obj: bpy.types.Object,
+    auto_calc_inertia: bool = False,
+    auto_calc_volume: bool = False,
+    out_child_obj_to_index: dict[bpy.types.Object, int] = None
+) -> BoundComposite:
     composite_xml = BoundComposite()
 
     for child in obj.children:
@@ -62,6 +68,8 @@ def create_composite_xml(obj: bpy.types.Object, auto_calc_inertia: bool = False,
         if child_xml is None:
             continue
 
+        if out_child_obj_to_index is not None:
+            out_child_obj_to_index[child] = len(composite_xml.children)
         composite_xml.children.append(child_xml)
 
     # Calculate extents after children have been created

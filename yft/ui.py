@@ -4,9 +4,14 @@ from ..ydr.ui import SOLLUMZ_PT_BONE_PANEL
 from ..ybn.ui import SOLLUMZ_PT_BOUND_PROPERTIES_PANEL
 from ..sollumz_properties import MaterialType, SollumType, BOUND_TYPES
 from ..sollumz_helper import find_sollumz_parent
-from .properties import GroupProperties, FragmentProperties, VehicleWindowProperties, VehicleLightID
-from .operators import SOLLUMZ_OT_CREATE_FRAGMENT, SOLLUMZ_OT_CREATE_BONES_AT_OBJECTS, SOLLUMZ_OT_SET_MASS, SOLLUMZ_OT_SET_LIGHT_ID, SOLLUMZ_OT_SELECT_LIGHT_ID
-
+from .properties import (
+    GroupProperties, FragmentProperties, VehicleWindowProperties, VehicleLightID,
+    GroupFlagBit,
+)
+from .operators import (
+    SOLLUMZ_OT_CREATE_FRAGMENT, SOLLUMZ_OT_CREATE_BONES_AT_OBJECTS, SOLLUMZ_OT_SET_MASS, SOLLUMZ_OT_SET_LIGHT_ID,
+    SOLLUMZ_OT_SELECT_LIGHT_ID, SOLLUMZ_OT_COPY_FRAG_BONE_PHYSICS
+)
 
 class SOLLUMZ_PT_FRAGMENT_TOOL_PANEL(bpy.types.Panel):
     bl_label = "Fragments"
@@ -74,6 +79,24 @@ class SOLLUMZ_PT_FRAGMENT_SET_MASS_PANEL(bpy.types.Panel):
         row.operator(SOLLUMZ_OT_SET_MASS.bl_idname, icon="WORLD")
         row.prop(context.scene, "set_mass_amount", text="")
         layout.operator("sollumz.calculate_mass", icon="SNAP_VOLUME")
+
+
+class SOLLUMZ_PT_FRAGMENT_COPY_BONE_PHYSICS_PANEL(bpy.types.Panel):
+    bl_label = "Copy Bone Physics"
+    bl_idname = "SOLLUMZ_PT_FRAGMENT_COPY_BONE_PHYSICS_PANEL"
+    bl_space_type = "VIEW_3D"
+    bl_region_type = "UI"
+    bl_options = {"DEFAULT_CLOSED"}
+    bl_parent_id = SOLLUMZ_PT_FRAGMENT_TOOL_PANEL.bl_idname
+    bl_order = 4
+
+    def draw_header(self, context):
+        self.layout.label(text="", icon="BONE_DATA")
+
+    def draw(self, context):
+        layout = self.layout
+        row = layout.row(align=True)
+        row.operator(SOLLUMZ_OT_COPY_FRAG_BONE_PHYSICS.bl_idname, icon="BONE_DATA")
 
 
 class SOLLUMZ_PT_LIGHT_ID_PANEL(bpy.types.Panel):
@@ -230,7 +253,7 @@ class SOLLUMZ_PT_BONE_PHYSICS_SUBPANEL(bpy.types.Panel):
 
     @classmethod
     def poll(cls, context):
-        return context.active_bone is not None and context.active_bone.sollumz_use_physics == True
+        return context.active_bone is not None and context.active_bone.sollumz_use_physics
 
     def draw(self, context):
         layout = self.layout
@@ -238,12 +261,28 @@ class SOLLUMZ_PT_BONE_PHYSICS_SUBPANEL(bpy.types.Panel):
         layout.use_property_decorate = False
 
         bone = context.active_bone
+        props = bone.group_properties
 
+        col = layout.column(heading="Flags")
+        col.prop(props, "flags", index=GroupFlagBit.DISAPPEAR_WHEN_DEAD, text="Disappear When Dead")
+        col.prop(props, "flags", index=GroupFlagBit.UNK_4, text="Unk 4")
+        col.prop(props, "flags", index=GroupFlagBit.UNK_8, text="Unk 8")
+        col.prop(props, "flags", index=GroupFlagBit.UNK_16, text="Unk 16")
+        col.prop(props, "flags", index=GroupFlagBit.UNK_32, text="Unk 32")
+
+        col = layout.column(heading="Breakable Glass")
+        row = col.row(align=True)
+        row.prop(props, "flags", index=GroupFlagBit.USE_GLASS_WINDOW, text="")
+        sub = row.row(align=True)
+        sub.active = props.flags[GroupFlagBit.USE_GLASS_WINDOW]
+        sub.prop(props, "glass_type", text="")
+
+        col = layout.column()
         for prop in GroupProperties.__annotations__:
-            if prop == "mass":
+            if prop in {"flags", "glass_type"}:
                 continue
 
-            layout.prop(bone.group_properties, prop)
+            col.prop(props, prop)
 
 
 class SOLLUMZ_PT_PHYSICS_CHILD_PANEL(bpy.types.Panel):
