@@ -20,8 +20,8 @@ class SOLLUMZ_MT_pie_menu(Menu):
         pie.operator("sollumz.autoconvertmaterial",
                      text="Convert Material", icon='NODE_MATERIAL')
         # Right
-        pie.operator("sollumz.addobjasentity",
-                     text="Add Objects To Room", icon='OBJECT_DATA')
+        pie.operator("sollumz.addobjasentity", icon='OBJECT_DATA')
+
         # Bottom
         pie.operator("sollumz.load_flag_preset",
                      text="Apply Flag Preset", icon='ALIGN_TOP')
@@ -32,8 +32,12 @@ class SOLLUMZ_MT_pie_menu(Menu):
         pie.operator("sollumz.import",
                      text="Import CodeWalker XML", icon='IMPORT')
         # Top-right
-        pie.operator("sollumz.export",
-                     text="Export CodeWalker XML", icon='EXPORT')
+        if context.scene.sollumz_export_path != "":
+            op = pie.operator("sollumz.export", text="Export CodeWalker XML", icon='EXPORT')
+            op.directory = context.scene.sollumz_export_path
+            op.direct_export = True
+        else:
+            pie.operator("sollumz.export", text="Export CodeWalker XML", icon='EXPORT')
         # Bottom-left
         pie.operator("sollumz.converttodrawable", icon='CUBE')
         # Bottom-right

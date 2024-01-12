@@ -7,16 +7,18 @@ from ..tools.drawablehelper import get_model_xmls_by_lod
 from .shader_materials import create_shader, get_detail_extra_sampler, create_tinted_shader_graph
 from ..ybn.ybnimport import create_bound_composite, create_bound_object
 from ..sollumz_properties import TextureFormat, TextureUsage, SollumType, SOLLUMZ_UI_NAMES
-from ..sollumz_preferences import get_import_settings
+from ..sollumz_preferences import get_addon_preferences, get_import_settings
 from ..cwxml.drawable import YDR, BoneLimit, Joints, Shader, ShaderGroup, Drawable, Bone, Skeleton, RotationLimit, DrawableModel
 from ..cwxml.bound import BoundChild
 from ..tools.blenderhelper import add_child_of_bone_constraint, create_empty_object, create_blender_object, join_objects, add_armature_modifier, parent_objs
 from ..tools.utils import get_filename
+from ..shared.shader_nodes import SzShaderNodeParameter
 from .model_data import ModelData, get_model_data, get_model_data_split_by_group
 from .mesh_builder import MeshBuilder
 from ..lods import LODLevels
 from .lights import create_light_objs
 from .properties import DrawableModelProperties
+from .render_bucket import RenderBucket
 from .. import logger
 
 
@@ -179,7 +181,7 @@ def set_lod_model_properties(model_objs: list[bpy.types.Object], drawable_xml: D
 
 def set_drawable_model_properties(model_props: DrawableModelProperties, model_xml: DrawableModel):
     model_props.render_mask = model_xml.render_mask
-    model_props.unknown_1 = model_xml.unknown_1
+    model_props.matrix_count = model_xml.matrix_count
     model_props.flags = model_xml.flags
 
 
@@ -229,8 +231,7 @@ def shadergroup_to_materials(shader_group: ShaderGroup, filepath: str):
 
 
 def shader_item_to_material(shader: Shader, shader_group: ShaderGroup, filepath: str):
-    texture_folder = os.path.dirname(
-        filepath) + "\\" + os.path.basename(filepath)[:-8]
+    texture_folder = os.path.dirname(filepath) + "\\" + os.path.basename(filepath)[:-8]
 
     filename = shader.filename
 
@@ -238,8 +239,8 @@ def shader_item_to_material(shader: Shader, shader_group: ShaderGroup, filepath:
         filename = f"{shader.name}.sps"
 
     material = create_shader(filename)
-
-    material.shader_properties.renderbucket = shader.render_bucket
+    material.name = shader.name
+    material.shader_properties.renderbucket = RenderBucket(shader.render_bucket).name
 
     for param in shader.parameters:
         for n in material.node_tree.nodes:
@@ -268,8 +269,11 @@ def shader_item_to_material(shader: Shader, shader_group: ShaderGroup, filepath:
                     if "Bump" in param.name or param.name == "distanceMapSampler":
                         n.image.colorspace_settings.name = "Non-Color"
 
-                    if param.texture_name and param.name == "DiffuseSampler":
-                        material.name = param.texture_name
+                    preferences = get_addon_preferences(bpy.context)
+                    text_name = preferences.use_text_name_as_mat_name
+                    if text_name:
+                        if param.texture_name and param.name == "DiffuseSampler":
+                            material.name = param.texture_name
 
                     # Assign embedded texture dictionary properties
                     if shader_group.texture_dictionary is not None:
@@ -277,19 +281,16 @@ def shader_item_to_material(shader: Shader, shader_group: ShaderGroup, filepath:
                             if texture.name == param.texture_name:
                                 n.texture_properties.embedded = True
                                 try:
-                                    format = TextureFormat[texture.format.replace(
-                                        "D3DFMT_", "")]
+                                    format = TextureFormat[texture.format.replace("D3DFMT_", "")]
                                     n.texture_properties.format = format
                                 except AttributeError:
-                                    print(
-                                        f"Failed to set texture format: format '{texture.format}' unknown.")
+                                    print(f"Failed to set texture format: format '{texture.format}' unknown.")
 
                                 try:
                                     usage = TextureUsage[texture.usage]
                                     n.texture_properties.usage = usage
                                 except AttributeError:
-                                    print(
-                                        f"Failed to set texture usage: usage '{texture.usage}' unknown.")
+                                    print(f"Failed to set texture usage: usage '{texture.usage}' unknown.")
 
                                 n.texture_properties.extra_flags = texture.extra_flags
 
@@ -304,17 +305,15 @@ def shader_item_to_material(shader: Shader, shader_group: ShaderGroup, filepath:
                         n.image.source = "FILE"
                         n.image.filepath = "//" + param.texture_name + ".dds"
 
-            elif isinstance(n, bpy.types.ShaderNodeValue):
-                if param.name == n.name[:-2]:
-                    key = n.name[-1]
-                    if key == "x":
-                        n.outputs[0].default_value = param.x
-                    if key == "y":
-                        n.outputs[0].default_value = param.y
-                    if key == "z":
-                        n.outputs[0].default_value = param.z
-                    if key == "w":
-                        n.outputs[0].default_value = param.w
+            elif isinstance(n, SzShaderNodeParameter):
+                if param.name == n.name and n.num_rows == 1:
+                    n.set("X", param.x)
+                    if n.num_cols > 1:
+                        n.set("Y", param.y)
+                    if n.num_cols > 2:
+                        n.set("Z", param.z)
+                    if n.num_cols > 3:
+                        n.set("W", param.w)
 
     # assign extra detail node image for viewing
     dtl_ext = get_detail_extra_sampler(material)
@@ -476,7 +475,6 @@ def set_drawable_properties(obj: bpy.types.Object, drawable_xml: Drawable):
     obj.drawable_properties.lod_dist_med = drawable_xml.lod_dist_med
     obj.drawable_properties.lod_dist_low = drawable_xml.lod_dist_low
     obj.drawable_properties.lod_dist_vlow = drawable_xml.lod_dist_vlow
-    obj.drawable_properties.unknown_9A = drawable_xml.unknown_9A
 
 
 def create_drawable_as_asset(drawable_xml: Drawable, name: str, filepath: str):
@@ -501,6 +499,13 @@ def create_drawable_as_asset(drawable_xml: Drawable, name: str, filepath: str):
 
     joined_obj = join_objects(model_objs)
     joined_obj.name = name
+
+    for modifier in joined_obj.modifiers:
+        if modifier.type == 'ARMATURE':
+            joined_obj.modifiers.remove(modifier)
+
+    for constraint in joined_obj.constraints:
+        joined_obj.constraints.remove(constraint)
 
     joined_obj.asset_mark()
     joined_obj.asset_generate_preview()

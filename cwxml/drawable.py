@@ -211,7 +211,6 @@ class ShaderGroup(ElementTree):
 
     def __init__(self):
         super().__init__()
-        self.unknown_30 = ValueProperty("Unknown30", 0)
         self.texture_dictionary = TextureDictionaryList()
         self.shaders = ShadersList()
 
@@ -346,8 +345,6 @@ class Light(ElementTree):
         self.falloff_exponent = ValueProperty("FalloffExponent")
         self.culling_plane_normal = VectorProperty("CullingPlaneNormal")
         self.culling_plane_offset = ValueProperty("CullingPlaneOffset")
-        self.unknown_45 = ValueProperty("Unknown45")
-        self.unknown_46 = ValueProperty("Unknown46")
         self.volume_intensity = ValueProperty("VolumeIntensity")
         self.volume_size_scale = ValueProperty("VolumeSizeScale")
         self.volume_outer_color = ColorProperty("VolumeOuterColour")
@@ -569,7 +566,7 @@ class DrawableModel(ElementTree):
         self.flags = ValueProperty("Flags", 0)
         self.has_skin = ValueProperty("HasSkin", 0)  # 0 = false, 1 = true
         self.bone_index = ValueProperty("BoneIndex", 0)
-        self.unknown_1 = ValueProperty("Unknown1", 0)
+        self.matrix_count = ValueProperty("Unknown1", 0)
         self.geometries = GeometriesList()
 
 
@@ -612,7 +609,6 @@ class Drawable(ElementTree, AbstractClass):
         self.flags_med = ValueProperty("FlagsMed", 0)
         self.flags_low = ValueProperty("FlagsLow", 0)
         self.flags_vlow = ValueProperty("FlagsVlow", 0)
-        self.unknown_9A = ValueProperty("Unknown9A", 0)
 
         self.shader_group = ShaderGroup()
         self.skeleton = Skeleton()

@@ -9,28 +9,69 @@ import os
 
 
 class CollisionMatFlags(bpy.types.PropertyGroup):
-    none: bpy.props.BoolProperty(name="NONE", default=False)
     stairs: bpy.props.BoolProperty(name="STAIRS", default=False)
     not_climbable: bpy.props.BoolProperty(name="NOT CLIMBABLE", default=False)
     see_through: bpy.props.BoolProperty(name="SEE THROUGH", default=False)
     shoot_through: bpy.props.BoolProperty(name="SHOOT THROUGH", default=False)
     not_cover: bpy.props.BoolProperty(name="NOT COVER", default=False)
     walkable_path: bpy.props.BoolProperty(name="WALKABLE PATH", default=False)
-    no_cam_collision: bpy.props.BoolProperty(
-        name="NO CAM COLLISION", default=False)
-    shoot_through_fx: bpy.props.BoolProperty(
-        name="SHOOT THROUGH FX", default=False)
+    no_cam_collision: bpy.props.BoolProperty(name="NO CAM COLLISION", default=False)
+    shoot_through_fx: bpy.props.BoolProperty(name="SHOOT THROUGH FX", default=False)
     no_decal: bpy.props.BoolProperty(name="NO DECAL", default=False)
     no_navmesh: bpy.props.BoolProperty(name="NO NAVMESH", default=False)
     no_ragdoll: bpy.props.BoolProperty(name="NO RAGDOLL", default=False)
     vehicle_wheel: bpy.props.BoolProperty(name="VEHICLE WHEEL", default=False)
     no_ptfx: bpy.props.BoolProperty(name="NO PTFX", default=False)
-    too_steep_for_player: bpy.props.BoolProperty(
-        name="TOO STEEP FOR PLAYER", default=False)
-    no_network_spawn: bpy.props.BoolProperty(
-        name="NO NETWORK SPAWN", default=False)
-    no_cam_collision_allow_clipping: bpy.props.BoolProperty(
-        name="NO CAM COLLISION ALLOW CLIPPING", default=False)
+    too_steep_for_player: bpy.props.BoolProperty(name="TOO STEEP FOR PLAYER", default=False)
+    no_network_spawn: bpy.props.BoolProperty(name="NO NETWORK SPAWN", default=False)
+    no_cam_collision_allow_clipping: bpy.props.BoolProperty(name="NO CAM COLLISION ALLOW CLIPPING", default=False)
+
+
+def set_collision_mat_raw_flags(f: CollisionMatFlags, flags_lo: int, flags_hi: int):
+    # fmt: off
+    f.stairs           = (flags_lo & (1 << 0)) != 0
+    f.not_climbable    = (flags_lo & (1 << 1)) != 0
+    f.see_through      = (flags_lo & (1 << 2)) != 0
+    f.shoot_through    = (flags_lo & (1 << 3)) != 0
+    f.not_cover        = (flags_lo & (1 << 4)) != 0
+    f.walkable_path    = (flags_lo & (1 << 5)) != 0
+    f.no_cam_collision = (flags_lo & (1 << 6)) != 0
+    f.shoot_through_fx = (flags_lo & (1 << 7)) != 0
+
+    f.no_decal                        = (flags_hi & (1 << 0)) != 0
+    f.no_navmesh                      = (flags_hi & (1 << 1)) != 0
+    f.no_ragdoll                      = (flags_hi & (1 << 2)) != 0
+    f.vehicle_wheel                   = (flags_hi & (1 << 3)) != 0
+    f.no_ptfx                         = (flags_hi & (1 << 4)) != 0
+    f.too_steep_for_player            = (flags_hi & (1 << 5)) != 0
+    f.no_network_spawn                = (flags_hi & (1 << 6)) != 0
+    f.no_cam_collision_allow_clipping = (flags_hi & (1 << 7)) != 0
+    # fmt: on
+
+
+def get_collision_mat_raw_flags(f: CollisionMatFlags) -> tuple[int, int]:
+    flags_lo = 0
+    flags_hi = 0
+    # fmt: off
+    flags_lo |= (1 << 0) if f.stairs else 0
+    flags_lo |= (1 << 1) if f.not_climbable else 0
+    flags_lo |= (1 << 2) if f.see_through else 0
+    flags_lo |= (1 << 3) if f.shoot_through else 0
+    flags_lo |= (1 << 4) if f.not_cover else 0
+    flags_lo |= (1 << 5) if f.walkable_path else 0
+    flags_lo |= (1 << 6) if f.no_cam_collision else 0
+    flags_lo |= (1 << 7) if f.shoot_through_fx else 0
+
+    flags_hi |= (1 << 0) if f.no_decal else 0
+    flags_hi |= (1 << 1) if f.no_navmesh else 0
+    flags_hi |= (1 << 2) if f.no_ragdoll else 0
+    flags_hi |= (1 << 3) if f.vehicle_wheel else 0
+    flags_hi |= (1 << 4) if f.no_ptfx else 0
+    flags_hi |= (1 << 5) if f.too_steep_for_player else 0
+    flags_hi |= (1 << 6) if f.no_network_spawn else 0
+    flags_hi |= (1 << 7) if f.no_cam_collision_allow_clipping else 0
+    # fmt: on
+    return flags_lo, flags_hi
 
 
 class CollisionProperties(CollisionMatFlags, bpy.types.PropertyGroup):
@@ -83,13 +124,8 @@ class BoundFlags(bpy.types.PropertyGroup):
 
 
 class BoundProperties(bpy.types.PropertyGroup):
-    procedural_id: bpy.props.IntProperty(name="Procedural ID", default=0)
-    room_id: bpy.props.IntProperty(name="Room ID", default=0)
-    ped_density: bpy.props.IntProperty(name="Ped Density", default=0)
-    poly_flags: bpy.props.IntProperty(name="Poly Flags", default=0)
     inertia: bpy.props.FloatVectorProperty(name="Inertia")
     volume: bpy.props.FloatProperty(name="Volume", precision=3)
-    unk_flags: bpy.props.FloatProperty(name="UnkFlags")
     unk_float_1: bpy.props.FloatProperty(name="UnkFloat 1")
     unk_float_2: bpy.props.FloatProperty(name="UnkFloat 2")
 

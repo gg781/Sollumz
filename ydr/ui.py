@@ -6,6 +6,8 @@ from ..sollumz_ui import SOLLUMZ_PT_OBJECT_PANEL, SOLLUMZ_PT_MAT_PANEL
 from ..sollumz_properties import SollumType, MaterialType, LightType, SOLLUMZ_UI_NAMES
 from ..sollumz_ui import FlagsPanel, TimeFlagsPanel
 from ..sollumz_helper import find_sollumz_parent
+from ..icons import icon_manager
+from ..shared.shader_nodes import SzShaderNodeParameter
 
 
 class SOLLUMZ_PT_DRAWABLE_PANEL(bpy.types.Panel):
@@ -22,19 +24,21 @@ class SOLLUMZ_PT_DRAWABLE_PANEL(bpy.types.Panel):
 
     def draw(self, context):
         layout = self.layout
-        layout.use_property_decorate = False
-        layout.use_property_split = True
-
         obj = context.active_object
+        drawable_props = obj.drawable_properties
 
-        layout.prop(obj.drawable_properties, "lod_dist_high")
-        layout.prop(obj.drawable_properties, "lod_dist_med")
-        layout.prop(obj.drawable_properties, "lod_dist_low")
-        layout.prop(obj.drawable_properties, "lod_dist_vlow")
+        col = layout.column(align=True)
+        col.use_property_decorate = False
+        col.use_property_split = True
 
-        layout.separator()
+        col.prop(drawable_props, "lod_dist_high", text="Lod Distance High")
+        col.prop(drawable_props, "lod_dist_med", text="Med")
+        col.prop(drawable_props, "lod_dist_low", text="Low")
+        col.prop(drawable_props, "lod_dist_vlow", text="Vlow")
 
-        layout.operator("sollumz.order_shaders", icon="MATERIAL")
+        col.separator()
+
+        col.operator("sollumz.order_shaders", icon="MATERIAL")
 
 
 class SOLLUMZ_UL_SHADER_ORDER_LIST(bpy.types.UIList):
@@ -117,7 +121,7 @@ class SOLLUMZ_PT_DRAWABLE_MODEL_PANEL(bpy.types.Panel):
         col.separator()
 
         layout.prop(model_props, "render_mask")
-        layout.prop(model_props, "unknown_1")
+        layout.prop(model_props, "matrix_count")
         layout.prop(model_props, "flags")
 
 
@@ -144,55 +148,99 @@ class SOLLUMZ_PT_LIGHT_PANEL(bpy.types.Panel):
     bl_space_type = "PROPERTIES"
     bl_region_type = "WINDOW"
     bl_context = "data"
+    bl_options = {"DEFAULT_CLOSED"}
 
     @classmethod
     def poll(cls, context):
-        return context.light and context.active_object.sollum_type == SollumType.LIGHT
+        return context.light and context.active_object is not None
+
+    def draw_header(self, context):
+        icon_manager.icon_label("sollumz_icon", self)
 
     def draw(self, context):
         layout = self.layout
         layout.use_property_split = True
+
+        aobj = context.active_object
+
+        if aobj.sollum_type != SollumType.LIGHT:
+            row = layout.row()
+            row.prop(aobj, "sollum_type")
+            layout.label(text="No Sollumz light in the scene selected.", icon="ERROR")
+            return
+
         light = context.light
+
         row = layout.row()
         row.enabled = light.sollum_type != LightType.NONE
         row.prop(light, "sollum_type")
-        if light.sollum_type == LightType.NONE:
-            return
-        elif light.sollum_type == LightType.CAPSULE:
+
+        if light.sollum_type != LightType.NONE:
             layout.separator()
+
             box = layout.box()
-            box.label(text="Capsule Properties", icon="MESH_CAPSULE")
-            box.prop(light.light_properties, "cone_inner_angle")
-            box.prop(light.light_properties, "cone_outer_angle")
-            box.prop(light.light_properties, "extent")
-        layout.separator()
-        layout.prop(light.light_properties, "light_hash")
-        layout.prop(light.light_properties, "group_id")
-        layout.prop(light.light_properties, "projected_texture_hash")
-        layout.separator()
-        layout.prop(light.light_properties, "flashiness")
-        layout.separator()
-        layout.prop(light.light_properties, "volume_size_scale")
-        layout.prop(light.light_properties, "volume_outer_color")
-        layout.prop(light.light_properties, "volume_outer_intensity")
-        layout.prop(light.light_properties, "volume_outer_exponent")
-        layout.separator()
-        layout.prop(light.light_properties, "light_fade_distance")
-        layout.prop(light.light_properties, "shadow_fade_distance")
-        layout.prop(light.light_properties, "specular_fade_distance")
-        layout.prop(light.light_properties, "volumetric_fade_distance")
-        layout.separator()
-        layout.prop(light.light_properties, "culling_plane_normal")
-        layout.prop(light.light_properties, "culling_plane_offset")
-        layout.separator()
-        layout.prop(light.light_properties, "corona_size")
-        layout.prop(light.light_properties, "corona_intensity")
-        layout.prop(light.light_properties, "corona_z_bias")
-        layout.separator()
-        layout.prop(light.light_properties, "unknown_45")
-        layout.prop(light.light_properties, "unknown_46")
-        layout.separator()
-        layout.prop(light.light_properties, "shadow_blur")
+            box.label(text="General Properties")
+            box.prop(light, "color")
+            box.prop(light, "energy", text="Intensity")
+            box.prop(light, "cutoff_distance", text="Falloff")
+            box.prop(light, "shadow_soft_size", text="Falloff Exponent")
+            box.prop(light, "shadow_buffer_clip_start", text="Shadow Near Clip")
+
+            # Extra Properties
+            match light.sollum_type:
+                case LightType.SPOT:
+                    box = layout.box()
+                    box.label(text="Spot Properties")
+                    box.prop(light, "spot_size", text="Cone Outer Angle")
+                    box.prop(light, "spot_blend",text="Cone Inner Angle")
+                case LightType.CAPSULE:
+                    box = layout.box()
+                    box.label(text="Capsule Properties")
+                    box.prop(light.light_properties, "extent", index=0)
+
+            # Misc Properties
+            box = layout.box()
+            box.label(text="Misc Properties")
+            box.prop(light.light_properties, "light_hash")
+            box.prop(light.light_properties, "group_id")
+            box.prop(light.light_properties, "projected_texture_hash")
+            box.prop(light.light_properties, "flashiness")
+
+
+            # Volume properties
+            box = layout.box()
+            box.label(text="Volume Properties", icon="MOD_EXPLODE")
+            box.prop(light, "volume_factor", text="Volume Intensity")
+            box.prop(light.light_properties, "volume_size_scale")
+            box.prop(light.light_properties, "volume_outer_color")
+            box.prop(light.light_properties, "volume_outer_intensity")
+            box.prop(light.light_properties, "volume_outer_exponent")
+
+            # Distance properties
+            box = layout.box()
+            box.label(text="Distance Properties", icon="DRIVER_DISTANCE")
+            box.prop(light.light_properties, "light_fade_distance")
+            box.prop(light.light_properties, "shadow_fade_distance")
+            box.prop(light.light_properties, "specular_fade_distance")
+            box.prop(light.light_properties, "volumetric_fade_distance")
+
+            # Culling Plane
+            box = layout.box()
+            box.label(text="Culling Plane", icon="MESH_PLANE")
+            box.prop(light.light_properties, "culling_plane_normal")
+            box.prop(light.light_properties, "culling_plane_offset")
+
+            # Corona Properties
+            box = layout.box()
+            box.label(text="Corona Properties", icon="LIGHT_SUN")
+            box.prop(light.light_properties, "corona_size")
+            box.prop(light.light_properties, "corona_intensity")
+            box.prop(light.light_properties, "corona_z_bias")
+
+            # Advanced Properties
+            box = layout.box()
+            box.label(text="Advanced Properties", icon="TOOL_SETTINGS")
+            box.prop(light.light_properties, "shadow_blur")
 
 
 class SOLLUMZ_PT_LIGHT_TIME_FLAGS_PANEL(TimeFlagsPanel, bpy.types.Panel):
@@ -206,7 +254,8 @@ class SOLLUMZ_PT_LIGHT_TIME_FLAGS_PANEL(TimeFlagsPanel, bpy.types.Panel):
 
     @classmethod
     def poll(self, context):
-        return context.light is not None
+        obj = context.active_object
+        return obj is not None and obj.type == "LIGHT" and obj.sollum_type == SollumType.LIGHT
 
     def get_flags(self, context):
         light = context.light
@@ -223,7 +272,8 @@ class SOLLUMZ_PT_LIGHT_FLAGS_PANEL(FlagsPanel, bpy.types.Panel):
 
     @classmethod
     def poll(self, context):
-        return context.light is not None
+        obj = context.active_object
+        return obj is not None and obj.type == "LIGHT" and obj.sollum_type == SollumType.LIGHT
 
     def get_flags(self, context):
         light = context.light
@@ -337,7 +387,7 @@ class SOLLUMZ_PT_CREATE_DRAWABLE_PANEL(bpy.types.Panel):
 
 
 class SOLLUMZ_PT_CREATE_LIGHT_PANEL(bpy.types.Panel):
-    bl_label = "Create Lights"
+    bl_label = "Light Tools"
     bl_idname = "SOLLUMZ_PT_CREATE_LIGHT_PANEL"
     bl_category = "Sollumz Tools"
     bl_space_type = "VIEW_3D"
@@ -352,9 +402,35 @@ class SOLLUMZ_PT_CREATE_LIGHT_PANEL(bpy.types.Panel):
 
     def draw(self, context):
         layout = self.layout
+
         row = layout.row()
+        row.template_list(SOLLUMZ_UL_LIGHT_PRESET_LIST.bl_idname, "light_presets",
+                          context.scene, "light_presets", context.scene, "light_preset_index")
+        col = row.column(align=True)
+        col.operator(ydr_ops.SOLLUMZ_OT_save_light_preset.bl_idname, text="", icon="ADD")
+        col.operator(ydr_ops.SOLLUMZ_OT_delete_light_preset.bl_idname, text="", icon="REMOVE")
+        row = layout.row()
+        row.operator(ydr_ops.SOLLUMZ_OT_load_light_preset.bl_idname, icon='CHECKMARK')
+
+        layout.separator()
+        row = layout.row(align=True)
         row.operator(ydr_ops.SOLLUMZ_OT_create_light.bl_idname)
         row.prop(context.scene, "create_light_type", text="")
+
+
+class SOLLUMZ_UL_LIGHT_PRESET_LIST(bpy.types.UIList):
+    bl_idname = "SOLLUMZ_UL_LIGHT_PRESET_LIST"
+
+    def draw_item(
+        self, context, layout, data, item, icon, active_data, active_propname, index
+    ):
+        if self.layout_type in {"DEFAULT", "COMPACT"}:
+            row = layout.row()
+            row.label(text=item.name, icon="BOOKMARKS")
+        elif self.layout_type in {"GRID"}:
+            layout.alignment = "CENTER"
+            layout.prop(item, "name",
+                        text=item.name, emboss=False, icon="BOOKMARKS")
 
 
 class SOLLUMZ_PT_BONE_TOOLS_PANEL(bpy.types.Panel):
@@ -425,6 +501,9 @@ class SOLLUMZ_PT_BONE_PANEL(bpy.types.Panel):
     @classmethod
     def poll(cls, context):
         return context.mode != "EDIT_ARMATURE" and context.active_bone is not None
+
+    def draw_header(self, context):
+        icon_manager.icon_label("sollumz_icon", self)
 
     def draw(self, context):
         layout = self.layout
@@ -506,23 +585,22 @@ class SOLLUMZ_PT_TXTPARAMS_PANEL(bpy.types.Panel):
         nodes = mat.node_tree.nodes
         for n in nodes:
             if isinstance(n, bpy.types.ShaderNodeTexImage) and n.is_sollumz:
-                box = layout.box()
-                row = box.row(align=True)
-                row.label(text="Texture Type: " + n.name)
-                row.label(text="Texture Name: " + n.sollumz_texture_name)
+                SPLIT_FACTOR = 0.2
+                split = layout.split(factor=SPLIT_FACTOR)
+                split.alignment = "RIGHT"
+                split.label(text=n.name)
+                split.template_ID(n, "image", open="image.open")
 
-                if n.image:
-                    row = box.row()
-                    row.prop(n.image, "filepath", text="Texture Path")
-                    row = box.row()
-                    row.prop(n.texture_properties, "embedded")
+                if n.image is not None:
+                    split = layout.split(factor=SPLIT_FACTOR)  # split to align the props with the image selector
+                    _ = split.row()
+                    row = split.row()
                     row.enabled = n.image.filepath != ""
-                else:
-                    row = box.row()
-                    row.label(
-                        text="Image Texture has no linked image.", icon="ERROR")
+                    row.prop(n.texture_properties, "embedded")
+                    row.prop(n.image.colorspace_settings, "name", text="Color Space")
 
-                box.prop(n.texture_properties, "usage")
+                # TODO: verify if Usage can be completely removed
+                # box.prop(n.texture_properties, "usage")
 
 
 class SOLLUMZ_PT_VALUEPARAMS_PANEL(bpy.types.Panel):
@@ -551,67 +629,8 @@ class SOLLUMZ_PT_VALUEPARAMS_PANEL(bpy.types.Panel):
 
         nodes = mat.node_tree.nodes
         for n in nodes:  # LOOP SERERATE SO TEXTURES SHOW ABOVE VALUE PARAMS
-            if isinstance(n, bpy.types.ShaderNodeValue) and n.is_sollumz:
-                if n.name[-1] == "x":
-                    row = layout.row()
-                    row.label(text=n.name[:-2])
-
-                    x = n
-                    y = mat.node_tree.nodes[n.name[:-1] + "y"]
-                    z = mat.node_tree.nodes[n.name[:-1] + "z"]
-                    w = mat.node_tree.nodes[n.name[:-1] + "w"]
-
-                    row.prop(x.outputs[0], "default_value", text="X:")
-                    row.prop(y.outputs[0], "default_value", text="Y:")
-                    row.prop(z.outputs[0], "default_value", text="Z:")
-                    row.prop(w.outputs[0], "default_value", text="W:")
-
-
-class SOLLUMZ_PT_VALUEPARAMS_ARRAYS_PANEL(bpy.types.Panel):
-    bl_label = "Array Parameters"
-    bl_idname = "SOLLUMZ_PT_VALUEPARAMS_ARRAYS_PANEL"
-    bl_space_type = "PROPERTIES"
-    bl_region_type = "WINDOW"
-    bl_options = {"DEFAULT_CLOSED"}
-    bl_parent_id = SOLLUMZ_PT_MAT_PANEL.bl_idname
-    bl_order = 3
-
-    @classmethod
-    def poll(cls, context):
-        obj = context.active_object
-
-        if not obj:
-            return False
-
-        mat = obj.active_material
-
-        if mat is None or (mat is not None and mat.sollum_type != MaterialType.SHADER):
-            return False
-
-        for n in mat.node_tree.nodes:
-            if isinstance(n, bpy.types.ShaderNodeGroup) and n.is_sollumz:
-                return True
-
-    def draw(self, context):
-        layout = self.layout
-        mat = context.active_object.active_material
-
-        for n in mat.node_tree.nodes:
-            if not isinstance(n, bpy.types.ShaderNodeGroup) or not n.is_sollumz:
-                continue
-
-            row = layout.row()
-            row.label(text=n.name)
-
-            x = n.inputs[0]
-            y = n.inputs[1]
-            z = n.inputs[2]
-            w = n.inputs[3]
-
-            row.prop(x, "default_value", text="X:")
-            row.prop(y, "default_value", text="Y:")
-            row.prop(z, "default_value", text="Z:")
-            row.prop(w, "default_value", text="W:")
+            if isinstance(n, SzShaderNodeParameter):
+                n.draw(context, layout, label=n.name, compact=True)
 
 
 class SOLLUMZ_PT_CHILD_OF_SUBPANEL(bpy.types.Panel):

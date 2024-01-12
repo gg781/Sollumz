@@ -444,8 +444,10 @@ class FlagPropertyGroup:
 
         flags = int_to_bool_list(int(self.total), size=self.size)
         for index, flag_name in enumerate(self.__annotations__):
-            if index < 32:
-                self[flag_name] = flags[index]
+            if index >= self.size:
+                break
+
+            self[flag_name] = flags[index]
 
     def update_flag(self, context):
         flags = flag_prop_to_list(self.__class__, self, size=self.size)
@@ -484,6 +486,7 @@ time_items = [("0", "12:00 AM", ""),
 
 
 class TimeFlags(FlagPropertyGroup, bpy.types.PropertyGroup):
+    size = 24
     hour1: bpy.props.BoolProperty(
         name="12:00 AM - 1:00 AM", update=FlagPropertyGroup.update_flag)
     hour2: bpy.props.BoolProperty(
@@ -532,22 +535,6 @@ class TimeFlags(FlagPropertyGroup, bpy.types.PropertyGroup):
         name="10:00 PM - 11:00 PM", update=FlagPropertyGroup.update_flag)
     hour24: bpy.props.BoolProperty(
         name="11:00 PM - 12:00 AM", update=FlagPropertyGroup.update_flag)
-    unk1: bpy.props.BoolProperty(
-        name="Unknown 1", update=FlagPropertyGroup.update_flag)
-    unk2: bpy.props.BoolProperty(
-        name="Unknown 2", update=FlagPropertyGroup.update_flag)
-    unk3: bpy.props.BoolProperty(
-        name="Unknown 3", update=FlagPropertyGroup.update_flag)
-    unk4: bpy.props.BoolProperty(
-        name="Unknown 4", update=FlagPropertyGroup.update_flag)
-    unk5: bpy.props.BoolProperty(
-        name="Unknown 5", update=FlagPropertyGroup.update_flag)
-    unk6: bpy.props.BoolProperty(
-        name="Unknown 6", update=FlagPropertyGroup.update_flag)
-    unk7: bpy.props.BoolProperty(
-        name="Unknown 7", update=FlagPropertyGroup.update_flag)
-    unk8: bpy.props.BoolProperty(
-        name="Unknown 8", update=FlagPropertyGroup.update_flag)
 
     time_flags_start: bpy.props.EnumProperty(
         items=time_items, name="Time Start")
@@ -682,6 +669,13 @@ def register():
     bpy.types.Scene.debug_lights_only_selected = bpy.props.BoolProperty(
         name="Limit to Selected", description="Only set intensity of the selected lights. (All instances will be affected)")
 
+    bpy.types.Scene.sollumz_export_path = bpy.props.StringProperty(
+        name="Export Path",
+        default="",
+        description="The path where files will be exported. If not set, the export dialog will be opened",
+        subtype="DIR_PATH",
+    )
+
 
 def unregister():
     del bpy.types.Object.sollum_type
@@ -691,3 +685,4 @@ def unregister():
     del bpy.types.Scene.debug_sollum_type
     del bpy.types.Scene.all_sollum_type
     del bpy.types.Scene.debug_lights_only_selected
+    del bpy.types.Scene.sollumz_export_path

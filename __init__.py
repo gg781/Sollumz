@@ -13,15 +13,18 @@
 
 from . import auto_load
 from . import sollumz_debug
+from . import sollumz_tool
 
 
 bl_info = {
     "name": "Sollumz",
     "author": "Skylumz and Colton",
-    "description": "This plugins allows you to import/export codewalker xml files.",
-    "blender": (3, 5, 1),
-    "version": (2, 1, 0),
-    "category": "Import-Export"
+    "description": "This plugins allows you to import/export CodeWalker XML files.",
+    "blender": (4, 0, 0),
+    "version": (2, 3, 1),
+    "category": "Import-Export",
+    "doc_url": "https://sollumz.gitbook.io/sollumz-wiki/",
+    "tracker_url": "https://github.com/Skylumz/Sollumz/issues",
 }
 
 
@@ -32,6 +35,12 @@ auto_load.init()
 def register():
     auto_load.register()
 
+    # WorkSpaceTools need to be registered after normal modules so the keymaps
+    # detect the registed operators
+    sollumz_tool.register_tools()
+
 
 def unregister():
+    sollumz_tool.unregister_tools()
+
     auto_load.unregister()

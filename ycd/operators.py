@@ -4,7 +4,7 @@ from ..sollumz_properties import SollumType
 from ..tools.blenderhelper import find_child_by_type
 from ..tools.meshhelper import flip_uv
 from ..tools.utils import color_hash
-from ..tools.animationhelper import is_any_sollumz_animation_obj, update_uv_clip_hash
+from ..tools.animationhelper import is_any_sollumz_animation_obj, update_uv_clip_hash, get_scene_fps
 from .ycdimport import create_clip_dictionary_template, create_anim_obj
 from .. import logger
 
@@ -80,7 +80,7 @@ class SOLLUMZ_OT_clip_apply_nla(SOLLUMZ_OT_base, bpy.types.Operator):
         if target is None:
             return {"FINISHED"}
 
-        clip_frame_count = clip_properties.get_frame_count()
+        clip_frame_duration = clip_properties.get_duration_in_frames()
 
         groups = {}
 
@@ -90,8 +90,8 @@ class SOLLUMZ_OT_clip_apply_nla(SOLLUMZ_OT_base, bpy.types.Operator):
 
             animation_properties = clip_animation.animation.animation_properties
 
-            start_frames = clip_animation.start_frame
-            end_frames = clip_animation.end_frame
+            start_frame = clip_animation.start_frame
+            end_frame = clip_animation.end_frame
 
             action = animation_properties.action
 
@@ -102,8 +102,8 @@ class SOLLUMZ_OT_clip_apply_nla(SOLLUMZ_OT_base, bpy.types.Operator):
 
             group.append({
                 "name": clip_properties.hash,
-                "start_frames": start_frames,
-                "end_frames": end_frames,
+                "start_frame": start_frame,
+                "end_frame": end_frame,
                 "action": action,
             })
 
@@ -118,11 +118,9 @@ class SOLLUMZ_OT_clip_apply_nla(SOLLUMZ_OT_base, bpy.types.Operator):
             track.name = group_name
 
             for clip in clips:
-                action_frames_count = clip["end_frames"] - clip["start_frames"]
-
                 nla_strip = track.strips.new(clip["name"], 0, clip["action"])
                 nla_strip.frame_start = 0
-                nla_strip.frame_end = clip_frame_count
+                nla_strip.frame_end = clip_frame_duration
 
                 bpy.context.scene.frame_start = 0
                 bpy.context.scene.frame_end = int(nla_strip.frame_end)
@@ -131,9 +129,10 @@ class SOLLUMZ_OT_clip_apply_nla(SOLLUMZ_OT_base, bpy.types.Operator):
                 nla_strip.extrapolation = "NOTHING"
                 nla_strip.name = clip["name"]
 
-                nla_strip.scale = clip_frame_count / action_frames_count
-                nla_strip.action_frame_start = clip["start_frames"]
-                nla_strip.action_frame_end = clip["end_frames"]
+                action_frame_duration = clip["end_frame"] - clip["start_frame"]
+                nla_strip.scale = clip_frame_duration / action_frame_duration
+                nla_strip.action_frame_start = clip["start_frame"]
+                nla_strip.action_frame_end = clip["end_frame"]
 
         return {"FINISHED"}
 
@@ -244,7 +243,7 @@ class SOLLUMZ_OT_clip_new_tag(SOLLUMZ_OT_base, bpy.types.Operator):
 
         if clip_properties.duration != 0.0:
             # place the tag at the current frame
-            phase = bpy.context.scene.frame_float / bpy.context.scene.render.fps / clip_properties.duration
+            phase = bpy.context.scene.frame_float / get_scene_fps() / clip_properties.duration
             phase = min(max(phase, 0.0), 1.0)
             tag.start_phase = phase
             tag.end_phase = phase
@@ -479,6 +478,61 @@ class SOLLUMZ_OT_clip_delete_property(SOLLUMZ_OT_base, bpy.types.Operator):
         clip_properties = active_object.clip_properties
 
         clip_properties.properties.remove(self.property_index)
+
+        return {"FINISHED"}
+
+
+class SOLLUMZ_OT_clip_new_property_attribute(SOLLUMZ_OT_base, bpy.types.Operator):
+    bl_idname = "sollumz.clip_new_property_attribute"
+    bl_label = "Add a new Property Attribute"
+    bl_description = "Add a new attribute to the property"
+
+    property_index: bpy.props.IntProperty()
+
+    def run(self, context):
+        if len(bpy.context.selected_objects) <= 0:
+            return {"FINISHED"}
+
+        active_object = bpy.context.selected_objects[0]
+
+        if active_object.sollum_type != SollumType.CLIP:
+            return {"FINISHED"}
+
+        clip_properties = active_object.clip_properties
+
+        prop = clip_properties.properties[self.property_index]
+        if not prop:
+            return {"FINISHED"}
+
+        prop.attributes.add()
+
+        return {"FINISHED"}
+
+
+class SOLLUMZ_OT_clip_delete_property_attribute(SOLLUMZ_OT_base, bpy.types.Operator):
+    bl_idname = "sollumz.clip_delete_property_attribute"
+    bl_label = "Delete Property Attribute"
+    bl_description = "Remove the attribute from the property"
+
+    property_index: bpy.props.IntProperty()
+    attribute_index: bpy.props.IntProperty()
+
+    def run(self, context):
+        if len(bpy.context.selected_objects) <= 0:
+            return {"FINISHED"}
+
+        active_object = bpy.context.selected_objects[0]
+
+        if active_object.sollum_type != SollumType.CLIP:
+            return {"FINISHED"}
+
+        clip_properties = active_object.clip_properties
+
+        prop = clip_properties.properties[self.property_index]
+        if not prop:
+            return {"FINISHED"}
+
+        prop.attributes.remove(self.attribute_index)
 
         return {"FINISHED"}
 
@@ -783,8 +837,8 @@ class SOLLUMZ_OT_uv_sprite_sheet_anim(SOLLUMZ_OT_base, bpy.types.Operator):
         min=0, default=0, subtype="PIXEL", step=100)
     keyframe_interval: bpy.props.IntProperty(
         name="Keyframe Interval",
-        description="Interval at which keyframes are inserted. It is recommended to use a multiple of 30 to prevent flickering in-game",
-        min=1, default=30)
+        description="Interval at which keyframes are inserted",
+        min=1, default=1)
     use_dst_frame: bpy.props.BoolProperty(
         name="Use Destination Frame",
         description="Specify the destination frame bounds manually instead of auto-calculating them. "
@@ -949,6 +1003,7 @@ class SOLLUMZ_OT_uv_sprite_sheet_anim(SOLLUMZ_OT_base, bpy.types.Operator):
     def render_callback(self, context):
         import gpu
         import gpu_extras
+        from gpu_extras import batch
         import blf
 
         img_w, img_h = self._image.size
@@ -1229,8 +1284,8 @@ class SOLLUMZ_OT_timeline_clip_tags_drag(SOLLUMZ_OT_base, bpy.types.Operator):
         clip_properties = clip_obj.clip_properties
 
         num_tags = len(clip_properties.tags)
-        clip_frame_count = clip_properties.get_frame_count()
-        if num_tags == 0 or clip_frame_count == 0:
+        clip_frame_duration = clip_properties.get_duration_in_frames()
+        if num_tags == 0 or clip_frame_duration == 0:
             return {"PASS_THROUGH"}
 
         region = context.region
@@ -1281,7 +1336,7 @@ class SOLLUMZ_OT_timeline_clip_tags_drag(SOLLUMZ_OT_base, bpy.types.Operator):
 
     def update_hovered_state(self, region, mouse_x, mouse_y, clip_obj):
         clip_properties = clip_obj.clip_properties
-        clip_frame_count = clip_properties.get_frame_count()
+        clip_frame_duration = clip_properties.get_duration_in_frames()
 
         view = region.view2d
 
@@ -1293,8 +1348,8 @@ class SOLLUMZ_OT_timeline_clip_tags_drag(SOLLUMZ_OT_base, bpy.types.Operator):
             start_phase = clip_tag.start_phase
             end_phase = clip_tag.end_phase
 
-            start_frame = clip_frame_count * start_phase
-            end_frame = clip_frame_count * end_phase
+            start_frame = clip_frame_duration * start_phase
+            end_frame = clip_frame_duration * end_phase
 
             start_x, _ = view.view_to_region(start_frame, 0, clip=False)
             end_x, _ = view.view_to_region(end_frame, 0, clip=False)
@@ -1356,11 +1411,11 @@ class SOLLUMZ_OT_timeline_clip_tags_drag(SOLLUMZ_OT_base, bpy.types.Operator):
 
     def handle_dragging(self, region, mouse_x, mouse_y, clip_obj):
         clip_properties = clip_obj.clip_properties
-        clip_frame_count = clip_properties.get_frame_count()
+        clip_frame_duration = clip_properties.get_duration_in_frames()
 
         view = region.view2d
         curr_frame, _ = view.region_to_view(mouse_x, mouse_y)
-        curr_phase = curr_frame / clip_frame_count
+        curr_phase = curr_frame / clip_frame_duration
 
         any_dragging = False
         clip_properties = clip_obj.clip_properties

@@ -1,11 +1,9 @@
 import bpy
 from typing import Union
-
 from mathutils import Vector, Quaternion
-
 from ..cwxml import ytyp as ytypxml, ymap as ymapxml
 from ..sollumz_properties import ArchetypeType, AssetType, EntityLodLevel, EntityPriorityLevel
-from .properties.ytyp import CMapTypesProperties, ArchetypeProperties, TimecycleModifierProperties, RoomProperties, PortalProperties, MloEntityProperties, EntitySetProperties
+from .properties.ytyp import CMapTypesProperties, ArchetypeProperties, SpecialAttribute, TimecycleModifierProperties, RoomProperties, PortalProperties, MloEntityProperties, EntitySetProperties
 from .properties.extensions import ExtensionProperties, ExtensionType, ExtensionsContainer
 
 
@@ -163,6 +161,16 @@ def set_extension_props(extension_xml: ymapxml.Extension, extension: ExtensionPr
         if isinstance(prop_value, Quaternion):
             prop_value = prop_value.to_euler()
 
+        if prop_name == "effect_hash":
+            # `effectHash` is stored as decimal value.
+            # Convert to `hash_` string or empty string for 0
+            try:
+                prop_value_int = int(prop_value)
+            except ValueError:
+                prop_value_int = 0
+            prop_value = f"hash_{prop_value_int:08X}" if prop_value_int != 0 else ""
+
+
         setattr(extension_properties, prop_name, prop_value)
 
 
@@ -231,7 +239,7 @@ def create_archetype(archetype_xml: ytypxml.BaseArchetype, ytyp: CMapTypesProper
 
     archetype.name = archetype_xml.name
     archetype.flags.total = str(archetype_xml.flags)
-    archetype.special_attribute = archetype_xml.special_attribute
+    archetype.special_attribute = SpecialAttribute(archetype_xml.special_attribute).name
     archetype.hd_texture_dist = archetype_xml.hd_texture_dist
     archetype.texture_dictionary = archetype_xml.texture_dictionary
     archetype.clip_dictionary = archetype_xml.clip_dictionary

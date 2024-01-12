@@ -1,33 +1,16 @@
 import xml.etree.ElementTree as ET
 import os
+from abc import ABC, abstractmethod
 from .element import (
     ElementTree,
-    ElementProperty,
     ListProperty,
     TextProperty,
+    AttributeProperty,
 )
-from .drawable import ParametersList, VertexLayoutList
+from .drawable import VertexLayoutList
 from ..tools import jenkhash
 from typing import Optional
-
-
-class RenderBucketProperty(ElementProperty):
-    value_types = (list)
-
-    def __init__(self, tag_name=None, value=None):
-        super().__init__(tag_name or "RenderBucket", value or [])
-
-    @classmethod
-    def from_xml(cls, element: ET.Element):
-        new = cls()
-        items = element.text.strip().split(" ")
-        for item in items:
-            new.value.append(int(item))
-        return new
-
-    def to_xml(self):
-        element = ET.Element(self.tag_name)
-        element.text = " ".join(self.value)
+from enum import Enum
 
 
 class FileNameList(ListProperty):
@@ -46,20 +29,159 @@ class LayoutList(ListProperty):
     tag_name = "Layout"
 
 
-class Shader(ElementTree):
+class ShaderParameterType(str, Enum):
+    TEXTURE = "Texture"
+    FLOAT = "float"
+    FLOAT2 = "float2"
+    FLOAT3 = "float3"
+    FLOAT4 = "float4"
+    FLOAT4X4 = "float4x4"
+
+
+class ShaderParameterSubtype(str, Enum):
+    RGB = "rgb"
+    RGBA = "rgba"
+    BOOL = "bool"
+
+
+class ShaderParameterDef(ElementTree, ABC):
     tag_name = "Item"
+
+    @property
+    @abstractmethod
+    def type() -> ShaderParameterType:
+        raise NotImplementedError
+
+    def __init__(self):
+        super().__init__()
+        self.name = AttributeProperty("name")
+        self.type = AttributeProperty("type", self.type)
+        self.subtype = AttributeProperty("subtype")
+        self.hidden = AttributeProperty("hidden", False)
+
+
+class ShaderParameterTextureDef(ShaderParameterDef):
+    type = ShaderParameterType.TEXTURE
+
+    def __init__(self):
+        super().__init__()
+        self.uv = AttributeProperty("uv")
+
+
+class ShaderParameterFloatVectorDef(ShaderParameterDef, ABC):
+    def __init__(self):
+        super().__init__()
+        self.count = AttributeProperty("count", 0)
+
+    @property
+    def is_array(self):
+        return self.count > 0
+
+
+class ShaderParameterFloatDef(ShaderParameterFloatVectorDef):
+    type = ShaderParameterType.FLOAT
+
+    def __init__(self):
+        super().__init__()
+        self.x = AttributeProperty("x", 0.0)
+
+
+class ShaderParameterFloat2Def(ShaderParameterFloatVectorDef):
+    type = ShaderParameterType.FLOAT2
+
+    def __init__(self):
+        super().__init__()
+        self.x = AttributeProperty("x", 0.0)
+        self.y = AttributeProperty("y", 0.0)
+
+
+class ShaderParameterFloat3Def(ShaderParameterFloatVectorDef):
+    type = ShaderParameterType.FLOAT3
+
+    def __init__(self):
+        super().__init__()
+        self.x = AttributeProperty("x", 0.0)
+        self.y = AttributeProperty("y", 0.0)
+        self.z = AttributeProperty("z", 0.0)
+
+
+class ShaderParameterFloat4Def(ShaderParameterFloatVectorDef):
+    type = ShaderParameterType.FLOAT4
+
+    def __init__(self):
+        super().__init__()
+        self.x = AttributeProperty("x", 0.0)
+        self.y = AttributeProperty("y", 0.0)
+        self.z = AttributeProperty("z", 0.0)
+        self.w = AttributeProperty("w", 0.0)
+
+
+class ShaderParameterFloat4x4Def(ShaderParameterDef):
+    type = ShaderParameterType.FLOAT4X4
+
+    def __init__(self):
+        super().__init__()
+
+
+class ShaderParameterDefsList(ListProperty):
+    list_type = ShaderParameterDef
+    tag_name = "Parameters"
+
+    @staticmethod
+    def from_xml(element: ET.Element):
+        new = ShaderParameterDefsList()
+
+        for child in element.iter():
+            if "type" in child.attrib:
+                param_type = child.get("type")
+                match param_type:
+                    case ShaderParameterType.TEXTURE:
+                        param = ShaderParameterTextureDef.from_xml(child)
+                    case ShaderParameterType.FLOAT:
+                        param = ShaderParameterFloatDef.from_xml(child)
+                    case ShaderParameterType.FLOAT2:
+                        param = ShaderParameterFloat2Def.from_xml(child)
+                    case ShaderParameterType.FLOAT3:
+                        param = ShaderParameterFloat3Def.from_xml(child)
+                    case ShaderParameterType.FLOAT4:
+                        param = ShaderParameterFloat4Def.from_xml(child)
+                    case ShaderParameterType.FLOAT4X4:
+                        param = ShaderParameterFloat4x4Def.from_xml(child)
+                    case _:
+                        assert False, f"Unknown shader parameter type '{param_type}'"
+
+                new.value.append(param)
+
+        return new
+
+
+class ShaderDef(ElementTree):
+    tag_name = "Item"
+
+    render_bucket: int
+    uv_maps: dict[str, int]
+    parameter_map: dict[str, ShaderParameterDef]
 
     def __init__(self):
         super().__init__()
         self.filename = TextProperty("Name", "")
-        self.render_buckets = RenderBucketProperty()
         self.layouts = LayoutList()
-        self.parameters = ParametersList("Parameters")
+        self.parameters = ShaderParameterDefsList("Parameters")
+        self.render_bucket = 0
+        self.uv_maps = {}
+        self.parameter_map = {}
 
     @property
     def required_tangent(self):
         for layout in self.layouts:
             if "Tangent" in layout.value:
+                return True
+        return False
+
+    @property
+    def required_normal(self):
+        for layout in self.layouts:
+            if "Normal" in layout.value:
                 return True
         return False
 
@@ -74,24 +196,35 @@ class Shader(ElementTree):
         return names
 
     @property
-    def is_uv_animation_supported(self) -> bool:
-        has_uv0 = False
-        has_uv1 = False
-        for param in self.parameters:
-            if param.name == "globalAnimUV0":
-                has_uv0 = True
-            if param.name == "globalAnimUV1":
-                has_uv1 = True
+    def used_colors(self) -> set[str]:
+        names = set()
+        for layout in self.layouts:
+            for field_name in layout.value:
+                if "Colour" in field_name:
+                    names.add(field_name)
 
-        return has_uv0 and has_uv1
+        return names
+
+    @property
+    def is_uv_animation_supported(self) -> bool:
+        return "globalAnimUV0" in self.parameter_map and "globalAnimUV1" in self.parameter_map
+
+    @classmethod
+    def from_xml(cls, element: ET.Element) -> "ShaderDef":
+        new: ShaderDef = super().from_xml(element)
+        new.uv_maps = {
+            p.name: p.uv for p in new.parameters if p.type == ShaderParameterType.TEXTURE and p.uv is not None
+        }
+        new.parameter_map = {p.name: p for p in new.parameters}
+        return new
 
 
 class ShaderManager:
     shaderxml = os.path.join(os.path.dirname(__file__), "Shaders.xml")
     # Map shader filenames to base shader names
-    _shaders_base_names: dict[Shader, str] = {}
-    _shaders: dict[str, Shader] = {}
-    _shaders_by_hash: dict[int, Shader] = {}
+    _shaders_base_names: dict[ShaderDef, str] = {}
+    _shaders: dict[str, ShaderDef] = {}
+    _shaders_by_hash: dict[int, ShaderDef] = {}
 
     terrains = ["terrain_cb_w_4lyr.sps", "terrain_cb_w_4lyr_lod.sps", "terrain_cb_w_4lyr_spec.sps", "terrain_cb_w_4lyr_spec_pxm.sps", "terrain_cb_w_4lyr_pxm_spm.sps",
                 "terrain_cb_w_4lyr_pxm.sps", "terrain_cb_w_4lyr_cm_pxm.sps", "terrain_cb_w_4lyr_cm_tnt.sps", "terrain_cb_w_4lyr_cm_pxm_tnt.sps", "terrain_cb_w_4lyr_cm.sps",
@@ -119,15 +252,20 @@ class ShaderManager:
     veh_decals = ["vehicle_decal.sps", "vehicle_decal2.sps",
                   "vehicle_blurredrotor_emissive.sps"]
     shadow_proxies = ["trees_shadow_proxy.sps"]
-    tint_flag_1 = ["trees_normal_diffspec_tnt.sps",
-                   "trees_tnt.sps", "trees_normal_spec_tnt.sps"]
-    tint_flag_2 = ["weapon_normal_spec_detail_tnt.sps", "weapon_normal_spec_cutout_palette.sps",
-                   "weapon_normal_spec_detail_palette.sps", "weapon_normal_spec_palette.sps"]
+    # Tint shaders that use colour1 instead of colour0 to index the tint palette
+    tint_colour1_shaders = ["trees_normal_diffspec_tnt.sps", "trees_tnt.sps", "trees_normal_spec_tnt.sps"]
+    palette_shaders = ["ped_palette.sps", "ped_default_palette.sps", "weapon_normal_spec_cutout_palette.sps",
+                       "weapon_normal_spec_detail_palette.sps", "weapon_normal_spec_palette.sps"]
     em_shaders = ["normal_spec_emissive.sps", "normal_spec_reflect_emissivenight.sps", "emissive.sps", "emissive_speclum.sps", "emissive_tnt.sps", "emissivenight.sps",
                   "emissivenight_geomnightonly.sps", "emissivestrong_alpha.sps", "emissivestrong.sps", "glass_emissive.sps", "glass_emissivenight.sps", "glass_emissivenight_alpha.sps",
                   "glass_emissive_alpha.sps", "decal_emissive_only.sps", "decal_emissivenight_only.sps"]
     water_shaders = ["water_fountain.sps",
                      "water_poolenv.sps", "water_decal.sps", "water_terrainfoam.sps", "water_riverlod.sps", "water_shallow.sps", "water_riverfoam.sps", "water_riverocean.sps", "water_rivershallow.sps"]
+
+    veh_paints = ["vehicle_paint1.sps", "vehicle_paint1_enveff.sps",
+                  "vehicle_paint2.sps", "vehicle_paint2_enveff.sps", "vehicle_paint3.sps", "vehicle_paint3_enveff.sps", "vehicle_paint3_lvr.sps", "vehicle_paint4.sps", "vehicle_paint4_emissive.sps",
+                  "vehicle_paint4_enveff.sps", "vehicle_paint5_enveff.sps", "vehicle_paint6.sps", "vehicle_paint6_enveff.sps", "vehicle_paint7.sps", "vehicle_paint7_enveff.sps", "vehicle_paint8.sps",
+                  "vehicle_paint9.sps",]
 
     def tinted_shaders():
         return ShaderManager.cutouts + ShaderManager.alphas + ShaderManager.glasses + ShaderManager.decals + ShaderManager.veh_cutouts + ShaderManager.veh_glasses + ShaderManager.veh_decals + ShaderManager.shadow_proxies
@@ -148,15 +286,17 @@ class ShaderManager:
                     continue
 
                 filename_hash = jenkhash.Generate(filename)
+                render_bucket = int(filename_elem.attrib["bucket"])
 
-                shader = Shader.from_xml(node)
+                shader = ShaderDef.from_xml(node)
                 shader.filename = filename
+                shader.render_bucket = render_bucket
                 ShaderManager._shaders[filename] = shader
                 ShaderManager._shaders_by_hash[filename_hash] = shader
                 ShaderManager._shaders_base_names[shader] = base_name
 
     @staticmethod
-    def find_shader(filename: str) -> Optional[Shader]:
+    def find_shader(filename: str) -> Optional[ShaderDef]:
         shader = ShaderManager._shaders.get(filename, None)
         if shader is None and filename.startswith("hash_"):
             filename_hash = int(filename[5:], 16)
@@ -169,5 +309,6 @@ class ShaderManager:
         if shader is None:
             return None
         return ShaderManager._shaders_base_names[shader]
+
 
 ShaderManager.load_shaders()

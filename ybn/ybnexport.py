@@ -31,7 +31,7 @@ from ..tools.meshhelper import (get_bound_center_from_bounds, calculate_volume,
 from ..sollumz_properties import MaterialType, SOLLUMZ_UI_NAMES, SollumType, BOUND_POLYGON_TYPES
 from ..sollumz_preferences import get_export_settings
 from .. import logger
-from .properties import CollisionMatFlags, BoundFlags
+from .properties import CollisionMatFlags, get_collision_mat_raw_flags, BoundFlags
 
 T_Bound = TypeVar("T_Bound", bound=Bound)
 T_BoundChild = TypeVar("T_BoundChild", bound=BoundChild)
@@ -155,7 +155,7 @@ def init_bound_child_xml(bound_xml: T_BoundChild, obj: bpy.types.Object, auto_ca
         bound_xml, obj, auto_calc_inertia, auto_calc_volume)
 
     set_composite_xml_flags(bound_xml, obj)
-    set_bound_xml_mat_index(bound_xml, obj)
+    set_bound_col_mat_xml_properties(bound_xml, obj.active_material)
 
     return bound_xml
 
@@ -232,16 +232,32 @@ def create_bound_xml_polys(geom_xml: BoundGeometry | BoundGeometryBVH, obj: bpy.
     ind_by_vert: dict[tuple, int] = {}
     ind_by_mat: dict[bpy.types.Material, int] = {}
 
-    def get_vert_index(vert: Vector):
-        # Must be tuple since Vector is not hashable
-        vertex = tuple(vert)
+    def get_vert_index(vert: Vector, vert_color: Optional[tuple[int, int, int, int]] = None):
+        default_vert_color = (255, 255, 255, 255)
 
-        if vertex in ind_by_vert:
-            return ind_by_vert[vertex]
+        # These are safety checks in case the user mixed poly primitives and poly meshes with color attributes
+        # This doesn't occur in original .ybns, if they have vertex colors, only poly triangles (meshes) are used.
+        if vert_color is not None and len(geom_xml.vertex_colors) != len(geom_xml.vertices):
+            # This vertex has color but previous ones didn't, assign a default color to all previous vertices
+            for _ in range(len(geom_xml.vertex_colors), len(geom_xml.vertices)):
+                geom_xml.vertex_colors.append(default_vert_color)
+
+        if vert_color is None and len(geom_xml.vertex_colors) != 0:
+            # There are already vertex colors in this geometry, assign a default color
+            vert_color = default_vert_color
+
+        # Tuple to uniquely identify this vertex and remove duplicates
+        # Must be tuple since Vector is not hashable
+        vertex_id = (*vert, *(vert_color or default_vert_color))
+
+        if vertex_id in ind_by_vert:
+            return ind_by_vert[vertex_id]
 
         vert_ind = len(ind_by_vert)
-        ind_by_vert[vertex] = vert_ind
-        geom_xml.vertices.append(Vector(vertex))
+        ind_by_vert[vertex_id] = vert_ind
+        geom_xml.vertices.append(Vector(vert))
+        if vert_color is not None:
+            geom_xml.vertex_colors.append(vert_color)
 
         return vert_ind
 
@@ -259,16 +275,14 @@ def create_bound_xml_polys(geom_xml: BoundGeometry | BoundGeometryBVH, obj: bpy.
 
     # If the bound object is a mesh, just convert its mesh data into triangles
     if isinstance(geom_xml, BoundGeometry):
-        create_bound_geom_xml_triangles(
-            obj, geom_xml, get_vert_index, get_mat_index)
+        create_bound_geom_xml_triangles(obj, geom_xml, get_vert_index, get_mat_index)
         return
 
     # For empty bound objects with children, create the bound polygons from its children
     for child in obj.children_recursive:
         if child.sollum_type not in BOUND_POLYGON_TYPES:
             continue
-        create_bound_xml_poly_shape(
-            child, geom_xml, get_vert_index, get_mat_index)
+        create_bound_xml_poly_shape(child, geom_xml, get_vert_index, get_mat_index)
 
 
 def create_bound_geom_xml_triangles(obj: bpy.types.Object, geom_xml: BoundGeometry, get_vert_index: Callable[[Vector], int], get_mat_index: Callable[[bpy.types.Material], int]):
@@ -283,18 +297,12 @@ def create_bound_geom_xml_triangles(obj: bpy.types.Object, geom_xml: BoundGeomet
 
     geom_xml.polygons = triangles
 
-    if mesh.vertex_colors:
-        create_xml_vertex_colors(geom_xml, mesh)
-
 
 def create_bound_xml_poly_shape(obj: bpy.types.Object, geom_xml: BoundGeometryBVH, get_vert_index: Callable[[Vector], int], get_mat_index: Callable[[bpy.types.Material], int]):
     mesh = create_export_mesh(obj)
 
     transforms = get_bound_poly_transforms_to_apply(
         obj, geom_xml.composite_transform)
-
-    if mesh.vertex_colors:
-        create_xml_vertex_colors(geom_xml, mesh)
 
     if obj.sollum_type == SollumType.BOUND_POLY_TRIANGLE:
         triangles = create_poly_xml_triangles(
@@ -351,28 +359,29 @@ def create_export_mesh(obj: bpy.types.Object):
     return mesh
 
 
-def create_xml_vertex_colors(geom_xml: BoundGeometry | BoundGeometryBVH, mesh: bpy.types.Mesh):
-    for loop in mesh.loops:
-        geom_xml.vertex_colors.append(
-            mesh.vertex_colors[0].data[loop.index].color)
-
-
 def create_poly_xml_triangles(mesh: bpy.types.Mesh, transforms: Matrix, get_vert_index: Callable[[Vector], int], get_mat_index: Callable[[bpy.types.Material], int]):
     """Create all bound polygon triangle XML objects for this BoundGeometry/BVH."""
     triangles: list[PolyTriangle] = []
+
+    color_attr = mesh.color_attributes[0] if len(mesh.color_attributes) > 0 else None
+    if color_attr is not None and (color_attr.domain != "CORNER" or color_attr.data_type != "BYTE_COLOR"):
+        color_attr = None
 
     for tri in mesh.loop_triangles:
         triangle = PolyTriangle()
         mat = mesh.materials[tri.material_index]
         triangle.material_index = get_mat_index(mat)
 
-        tri_indices: list[Vector] = []
+        tri_indices: list[int] = []
 
         for loop_idx in tri.loops:
             loop = mesh.loops[loop_idx]
 
             vert_pos = transforms @ mesh.vertices[loop.vertex_index].co
-            vert_ind = get_vert_index(vert_pos)
+            vert_color = color_attr.data[loop_idx].color_srgb if color_attr is not None else None
+            if vert_color is not None:
+                vert_color = (vert_color[0] * 255, vert_color[1] * 255, vert_color[2] * 255, vert_color[3] * 255)
+            vert_ind = get_vert_index(vert_pos, vert_color=vert_color)
 
             tri_indices.append(vert_ind)
 
@@ -456,19 +465,7 @@ def create_poly_cylinder_capsule_xml(poly_type: Type[T_PolyCylCap], obj: bpy.typ
 def create_col_mat_xml(mat: bpy.types.Material):
     mat_xml = Material()
     set_col_mat_xml_properties(mat_xml, mat)
-    set_col_mat_xml_flags(mat_xml, mat)
-
     return mat_xml
-
-
-def set_col_mat_xml_flags(mat_xml: Material, mat: bpy.types.Material):
-    for flag_name in CollisionMatFlags.__annotations__.keys():
-        if flag_name not in mat.collision_flags or mat.collision_flags[flag_name] == False:
-            continue
-        mat_xml.flags.append(f"FLAG_{flag_name.upper()}")
-
-    if not mat_xml.flags:
-        mat_xml.flags.append("NONE")
 
 
 def set_composite_xml_flags(bound_xml: BoundChild, obj: bpy.types.Object):
@@ -497,12 +494,18 @@ def get_composite_transforms(bound_obj: bpy.types.Object):
     return get_matrix_without_scale(export_transforms)
 
 
-def set_bound_xml_mat_index(bound_xml: BoundChild, obj: bpy.types.Object):
-    """Set ``bound_xml.material_index`` based on ``obj.active_material``."""
-    if obj.active_material is None or obj.active_material.sollum_type != MaterialType.COLLISION:
+def set_bound_col_mat_xml_properties(bound_xml: Bound, mat: bpy.types.Material):
+    if mat is None or mat.sollum_type != MaterialType.COLLISION:
         return
 
-    bound_xml.material_index = obj.active_material.collision_properties.collision_index
+    bound_xml.material_index = mat.collision_properties.collision_index
+    bound_xml.procedural_id = mat.collision_properties.procedural_id
+    bound_xml.room_id = mat.collision_properties.room_id
+    bound_xml.ped_density = mat.collision_properties.ped_density
+    bound_xml.material_color_index = mat.collision_properties.material_color_index
+    flags_lo, flags_hi = get_collision_mat_raw_flags(mat.collision_flags)
+    bound_xml.unk_flags = flags_lo
+    bound_xml.poly_flags = flags_hi
 
 
 def set_col_mat_xml_properties(mat_xml: Material, mat: bpy.types.Material):
@@ -511,6 +514,14 @@ def set_col_mat_xml_properties(mat_xml: Material, mat: bpy.types.Material):
     mat_xml.room_id = mat.collision_properties.room_id
     mat_xml.ped_density = mat.collision_properties.ped_density
     mat_xml.material_color_index = mat.collision_properties.material_color_index
+    for flag_name in CollisionMatFlags.__annotations__.keys():
+        if flag_name not in mat.collision_flags or not mat.collision_flags[flag_name]:
+            continue
+        mat_xml.flags.append(f"FLAG_{flag_name.upper()}")
+
+    if not mat_xml.flags:
+        mat_xml.flags.append("NONE")
+
 
 
 def set_bound_geom_xml_properties(geom_xml: BoundGeometry, obj: bpy.types.Object):
@@ -521,11 +532,6 @@ def set_bound_geom_xml_properties(geom_xml: BoundGeometry, obj: bpy.types.Object
 def set_bound_properties(bound_xml: Bound, obj: bpy.types.Object):
     scale = get_scale_to_apply_to_bound(obj)
 
-    bound_xml.procedural_id = obj.bound_properties.procedural_id
-    bound_xml.room_id = obj.bound_properties.room_id
-    bound_xml.ped_density = obj.bound_properties.ped_density
-    bound_xml.poly_flags = obj.bound_properties.poly_flags
-    bound_xml.unk_flags = obj.bound_properties.unk_flags
     bound_xml.margin = scale.x * obj.margin
     bound_xml.volume = obj.bound_properties.volume
     bound_xml.inertia = Vector(obj.bound_properties.inertia)

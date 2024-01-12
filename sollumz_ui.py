@@ -5,18 +5,19 @@ from .tools.blenderhelper import get_armature_obj
 from .sollumz_properties import SollumType, MaterialType
 from .lods import (SOLLUMZ_OT_SET_LOD_HIGH, SOLLUMZ_OT_SET_LOD_MED, SOLLUMZ_OT_SET_LOD_LOW, SOLLUMZ_OT_SET_LOD_VLOW,
                    SOLLUMZ_OT_SET_LOD_VERY_HIGH, SOLLUMZ_OT_HIDE_COLLISIONS, SOLLUMZ_OT_HIDE_SHATTERMAPS, SOLLUMZ_OT_HIDE_OBJECT, SOLLUMZ_OT_SHOW_COLLISIONS, SOLLUMZ_OT_SHOW_SHATTERMAPS)
-
+from .icons import icon_manager
 
 def draw_list_with_add_remove(layout: bpy.types.UILayout, add_operator: str, remove_operator: str, *temp_list_args, **temp_list_kwargs):
     """Draw a UIList with an add and remove button on the right column. Returns the left column."""
     row = layout.row()
     list_col = row.column()
     list_col.template_list(*temp_list_args, **temp_list_kwargs)
-    col = row.column(align=True)
+    side_col = row.column()
+    col = side_col.column(align=True)
     col.operator(add_operator, text="", icon="ADD")
     col.operator(remove_operator, text="", icon="REMOVE")
 
-    return list_col
+    return list_col, side_col
 
 
 class BasicListHelper:
@@ -255,7 +256,13 @@ class SOLLUMZ_PT_TOOL_PANEL(bpy.types.Panel):
         layout = self.layout
         row = layout.row()
         row.operator("sollumz.import")
-        row.operator("sollumz.export")
+
+        if context.scene.sollumz_export_path != "":
+            op = row.operator("sollumz.export")
+            op.directory = context.scene.sollumz_export_path
+            op.direct_export = True
+        else:
+            row.operator("sollumz.export")
 
 
 class SOLLUMZ_PT_VIEW_PANEL(bpy.types.Panel):
@@ -453,6 +460,23 @@ class SOLLUMZ_PT_DEBUG_PANEL(bpy.types.Panel):
         layout.operator("sollumz.replace_armature_constraints")
 
 
+class SOLLUMZ_PT_EXPORT_PATH_PANEL(bpy.types.Panel):
+    bl_label = "Export path"
+    bl_idname = "SOLLUMZ_PT_EXPORT_PATH_PANEL"
+    bl_category = "Sollumz Tools"
+    bl_space_type = "VIEW_3D"
+    bl_region_type = "UI"
+    bl_options = {"DEFAULT_CLOSED"}
+    bl_parent_id = SOLLUMZ_PT_TOOL_PANEL.bl_idname
+    bl_order = 5
+
+    def draw_header(self, context):
+        self.layout.label(text="", icon="FILEBROWSER")
+
+    def draw(self, context):
+        self.layout.prop(context.scene, "sollumz_export_path", text="")
+
+
 class SOLLUMZ_PT_TERRAIN_PAINTER_PANEL(bpy.types.Panel):
     bl_label = "Terrain Painter"
     bl_idname = "SOLLUMZ_PT_TERRAIN_PAINTER_PANEL"
@@ -484,6 +508,9 @@ class SOLLUMZ_PT_OBJECT_PANEL(bpy.types.Panel):
     bl_region_type = "WINDOW"
     bl_context = "object"
     bl_options = {"DEFAULT_CLOSED"}
+
+    def draw_header(self, context):
+        icon_manager.icon_label("sollumz_icon", self)
 
     def draw(self, context):
         layout = self.layout
@@ -544,6 +571,9 @@ class SOLLUMZ_PT_MAT_PANEL(bpy.types.Panel):
         obj = context.active_object
 
         return obj is not None and obj.active_material is not None
+
+    def draw_header(self, context):
+        icon_manager.icon_label("sollumz_icon", self)
 
     def draw(self, context):
         layout = self.layout
